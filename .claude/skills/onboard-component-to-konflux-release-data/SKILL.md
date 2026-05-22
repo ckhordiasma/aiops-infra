@@ -1,19 +1,19 @@
 ---
 name: onboard-component-to-konflux-release-data
-description: Onboards a component to the Konflux release pipeline by adding entries to the konflux-release-data GitLab repository and raising a merge request. Automates Step 2 (ODH) or Step 3 (RHOAI) of the component onboarding pipeline.
+description: Onboards a new ODH/RHOAI component onto the Konflux CI platform by raising a merge request to the konflux-release-data GitLab repo. Automates Step 3 of the ODH component onboarding pipeline.
 allowed-tools: Bash
 user-invocable: true
 ---
 
 # Onboard Component to Konflux Release Data
 
-Onboards a component to the Konflux release pipeline by adding entries to the konflux-release-data GitLab repository and raising a merge request. Automates Step 2 (ODH) or Step 3 (RHOAI) of the component onboarding pipeline.
-
+Creates Konflux Component resources for a new ODH/RHOAI component by appending YAML
+documents to the appropriate tenant config file in `konflux-release-data` and raising an MR.
 See the [playbook](${CLAUDE_SKILL_DIR}/../../../playbooks/onboard-component-to-konflux-release-data.md) for context.
 
 ## Usage
 
-/onboard-component-to-konflux-release-data [args]
+/onboard-component-to-konflux-release-data <jira-url>
 
 ## Implementation
 
@@ -23,11 +23,15 @@ Help the user accomplish this task by either:
 2. Collecting the required inputs and running the automation script:
 
 ```bash
-bash "${CLAUDE_SKILL_DIR}/../../../scripts/onboard-component-to-konflux-release-data.sh" $ARGUMENTS
+bash "${CLAUDE_SKILL_DIR}/../../../scripts/onboard-component-to-konflux-release-data.sh" \
+  --jira-url "$JIRA_URL"
 ```
 
-The Jira URL is required. The script fetches the component YAML from the Jira ticket attachment.
+A Jira URL is always required. The script downloads the component YAML from Jira,
+determines product context (ODH vs RHOAI) automatically, handles the different file
+modifications for each product, and runs manifest build/verify steps. VPN must be active
+for both GitLab and the Konflux OpenShift cluster.
 
-Required env vars: `GITLAB_USER`, `GITLAB_TOKEN`, `JIRA_USER_EMAIL`, `JIRA_API_TOKEN`.
-
-The `KONFLUX_RELEASE_DATA_REPO_URL` env var can override the default GitLab repo URL.
+For RHOAI components, `target_rhoai_version` in the onboarding YAML is mandatory and
+must be in `x.y` or `x.y-ea-n` format. The script modifies up to four files (ProjectDevelopmentStream,
+stage RPA, prod RPA, and automation resources).

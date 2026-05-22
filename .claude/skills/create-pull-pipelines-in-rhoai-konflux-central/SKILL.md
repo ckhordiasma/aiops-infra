@@ -1,19 +1,21 @@
 ---
 name: create-pull-pipelines-in-rhoai-konflux-central
-description: Creates Tekton pull-request PipelineRun YAMLs for a new RHOAI component in the rhoai-konflux-central GitHub repository and raises a pull request targeting the version-specific branch.
+description: Adds a pull-request Tekton PipelineRun YAML to the rhoai-konflux-central GitHub repository for a new RHOAI component, then raises a GitHub PR targeting the main branch.
 allowed-tools: Bash
 user-invocable: true
 ---
 
 # Create Pull Pipelines in RHOAI-Konflux-Central
 
-Creates Tekton pull-request PipelineRun YAMLs for a new RHOAI component in the rhoai-konflux-central GitHub repository and raises a pull request targeting the version-specific branch.
+Creates a Tekton PipelineRun resource for pull-request builds of a new RHOAI component by
+generating a pull-request PipelineRun YAML under `pipelineruns/<repo_name>/.tekton/` and
+raising a pull request to the `main` branch of `rhoai-konflux-central`.
 
 See the [playbook](${CLAUDE_SKILL_DIR}/../../../playbooks/create-pull-pipelines-in-rhoai-konflux-central.md) for context.
 
 ## Usage
 
-/create-pull-pipelines-in-rhoai-konflux-central [args]
+/create-pull-pipelines-in-rhoai-konflux-central [<jira-url>]
 
 ## Implementation
 
@@ -23,11 +25,11 @@ Help the user accomplish this task by either:
 2. Collecting the required inputs and running the automation script:
 
 ```bash
-bash "${CLAUDE_SKILL_DIR}/../../../scripts/create-pull-pipelines-in-rhoai-konflux-central.sh" $ARGUMENTS
+bash "${CLAUDE_SKILL_DIR}/../../../scripts/create-pull-pipelines-in-rhoai-konflux-central.sh" --jira-url "$JIRA_URL"
 ```
 
-The Jira URL is optional. When provided, the script tracks progress via Jira labels.
+The Jira URL is optional. If omitted, the script expects `component_onboarding_details.yaml` to already be present in the working directory.
 
-Required env vars: `GITHUB_USER`, `GITHUB_TOKEN`.
+If invoked with `--existing-pr-url <url>`, the script exits immediately (idempotency fast-path used by the orchestrator).
 
-The `RHOAI_KONFLUX_CENTRAL_REPO_URL` env var can override the default repo URL. The PR targets a version-specific branch, NOT `main`.
+Unlike the push PipelineRun (which targets a version-specific branch), this PR targets `main`.

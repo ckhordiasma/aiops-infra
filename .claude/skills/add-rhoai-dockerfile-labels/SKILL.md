@@ -7,13 +7,15 @@ user-invocable: true
 
 # Add RHOAI Dockerfile Labels
 
-Checks a component Dockerfile for mandatory RHOAI labels (name, com.redhat.component, summary, description, maintainer, io.k8s.display-name, io.k8s.description). If any are missing or incorrect, clones the component repo, adds the labels, and raises a GitHub PR. Updates the Jira ticket throughout.
+Ensures a component Dockerfile contains all mandatory RHOAI OCI labels. If labels are
+missing or incorrect, clones the repo, adds them, and raises a PR. If all labels are
+already correct, exits cleanly with a Jira update.
 
 See the [playbook](${CLAUDE_SKILL_DIR}/../../../playbooks/add-rhoai-dockerfile-labels.md) for context.
 
 ## Usage
 
-/add-rhoai-dockerfile-labels [args]
+/add-rhoai-dockerfile-labels [<jira-url>]
 
 ## Implementation
 
@@ -23,11 +25,9 @@ Help the user accomplish this task by either:
 2. Collecting the required inputs and running the automation script:
 
 ```bash
-bash "${CLAUDE_SKILL_DIR}/../../../scripts/add-rhoai-dockerfile-labels.sh" $ARGUMENTS
+bash "${CLAUDE_SKILL_DIR}/../../../scripts/add-rhoai-dockerfile-labels.sh" --jira-url "$JIRA_URL"
 ```
 
-The Jira URL is optional. When provided, the script tracks progress via Jira labels.
+The Jira URL is optional. If omitted, the script expects `component_onboarding_details.yaml` to already be present in the working directory.
 
-Required env vars: `GITHUB_USER`, `GITHUB_TOKEN`.
-
-If all 7 mandatory labels are already correct, the script exits cleanly without creating a PR.
+The seven mandatory labels are: `name`, `com.redhat.component`, `summary`, `description`, `maintainer`, `io.k8s.display-name`, `io.k8s.description`.

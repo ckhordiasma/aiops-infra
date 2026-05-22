@@ -1,19 +1,21 @@
 ---
 name: enable-renovate-on-rhoai-component-repo
-description: Enables Renovate dependency management on an RHOAI component repository by adding it to the konflux-central config.yaml and raising a GitHub pull request. Automates Step 9 of the RHOAI component onboarding pipeline.
+description: Enables Renovate dependency updates for a new RHOAI component repo by adding it to the renovate config in rhoai-konflux-central and raising a GitHub PR targeting main.
 allowed-tools: Bash
 user-invocable: true
 ---
 
 # Enable Renovate on RHOAI Component Repo
 
-Enables Renovate dependency management on an RHOAI component repository by adding it to the konflux-central config.yaml and raising a GitHub pull request. Automates Step 9 of the RHOAI component onboarding pipeline.
+Registers a new RHOAI component repository in the Renovate configuration maintained in
+`rhoai-konflux-central` (`config.yaml` on `main`) so that Renovate bot keeps its dependencies
+up to date. Raises a PR and monitors it to completion.
 
 See the [playbook](${CLAUDE_SKILL_DIR}/../../../playbooks/enable-renovate-on-rhoai-component-repo.md) for context.
 
 ## Usage
 
-/enable-renovate-on-rhoai-component-repo [args]
+/enable-renovate-on-rhoai-component-repo [<jira-url>]
 
 ## Implementation
 
@@ -23,11 +25,9 @@ Help the user accomplish this task by either:
 2. Collecting the required inputs and running the automation script:
 
 ```bash
-bash "${CLAUDE_SKILL_DIR}/../../../scripts/enable-renovate-on-rhoai-component-repo.sh" $ARGUMENTS
+bash "${CLAUDE_SKILL_DIR}/../../../scripts/enable-renovate-on-rhoai-component-repo.sh" --jira-url "$JIRA_URL"
 ```
 
-The Jira URL is optional. The script fetches the component YAML from the Jira ticket attachment if provided.
+The Jira URL is optional. If omitted, the script expects `component_onboarding_details.yaml` to already be present in the working directory.
 
-Required env vars: `GITHUB_USER`, `GITHUB_TOKEN`.
-
-The `RHOAI_KONFLUX_CENTRAL_REPO_URL` env var can override the default repo URL.
+If invoked with `--existing-pr-url <url>`, the script exits immediately (idempotency fast-path used by the orchestrator).

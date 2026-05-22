@@ -7,17 +7,12 @@ user-invocable: true
 
 # Update RHOAI Product Listing
 
-Adds the new component's registry path to the RHOAI product listing in pyxis-repo-configs. The entry is a single line in the repositories array of product-listings/rhoai/rhoai.yaml. This skill handles the full lifecycle.
-
+Adds the new component's registry path to the RHOAI product listing in `pyxis-repo-configs`.
 See the [playbook](${CLAUDE_SKILL_DIR}/../../../playbooks/update-rhoai-product-listing.md) for context.
 
 ## Usage
 
 /update-rhoai-product-listing [<jira-url>]
-
-Examples:
-- /update-rhoai-product-listing https://redhat.atlassian.net/browse/RHOAIENG-1234
-- /update-rhoai-product-listing
 
 ## Implementation
 
@@ -27,15 +22,10 @@ Help the user accomplish this task by either:
 2. Collecting the required inputs and running the automation script:
 
 ```bash
-bash "${CLAUDE_SKILL_DIR}/../../../scripts/update-rhoai-product-listing.sh" ${JIRA_URL:+"$JIRA_URL"}
+bash "${CLAUDE_SKILL_DIR}/../../../scripts/update-rhoai-product-listing.sh" \
+  --jira-url "$JIRA_URL"
 ```
 
-**Input notes:**
-- JIRA_URL is optional but recommended; if omitted, component_onboarding_details.yaml must exist in the working directory
-- If --existing-mr-url is passed, the script exits immediately (idempotency fast-path)
-
-**Edge cases:**
-- Requires component_onboarding_details.yaml attachment on Jira (created by /create-component-onboarding-jira)
-- If product listing entry already exists in product-listings/rhoai/rhoai.yaml, script exits 0 and updates Jira
-- VPN must be active to access gitlab.cee.redhat.com
-- Registry path follows pattern: registry.access.redhat.com/rhoai/<component-name>-rhel9
+The Jira ticket must have `component_onboarding_details.yaml` attached. The script
+derives the registry path (`registry.access.redhat.com/rhoai/<component_name>-rhel9`)
+from the component name automatically. VPN must be active for GitLab access.
