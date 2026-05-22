@@ -3,7 +3,7 @@
 Triggers the `odh-konflux-onboarder` GitHub Actions workflow in the `odh-konflux-central` repository, waits for it to complete, and extracts the resulting Tekton PR URL from the workflow logs.
 
 **Applies to:** ODH
-**Pipeline step:** 5
+**Pipeline step:** 6
 
 ## When to use
 
