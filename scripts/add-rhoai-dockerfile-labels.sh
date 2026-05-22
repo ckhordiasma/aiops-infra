@@ -1,183 +1,220 @@
 #!/usr/bin/env bash
-# add-rhoai-dockerfile-labels.sh — Adds mandatory RHOAI labels to Dockerfile
+# add-rhoai-dockerfile-labels.sh — Check/add mandatory RHOAI Dockerfile labels
 #
 # Usage:
-#   ./scripts/add-rhoai-dockerfile-labels.sh <jira-url>
+#   ./scripts/add-rhoai-dockerfile-labels.sh [--jira-url <url>]
 #
 # Required env vars:
 #   GITHUB_USER, GITHUB_TOKEN
 #
-# Optional (when jira-url is provided):
+# Required when --jira-url is provided:
 #   JIRA_USER_EMAIL, JIRA_API_TOKEN
-#
-# Optional env vars:
-#   JIRA_SERVER (default: https://redhat.atlassian.net)
 
 set -euo pipefail
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# ── Parse inputs ──────────────────────────────────────────────────────────────
+# ── Parse inputs ──────────────
+JIRA_URL=""
+JIRA_ID=""
 
-if [[ $# -lt 1 ]]; then
-  echo "ERROR: Jira URL is required"
-  echo "Usage: $0 <jira-url>"
-  exit 1
-fi
-
-JIRA_URL="$1"
-JIRA_ID="${JIRA_URL##*/}"
-
-echo "JIRA_URL: $JIRA_URL"
-echo "JIRA_ID: $JIRA_ID"
-
-# ── Check prerequisites ───────────────────────────────────────────────────────
-
-bash "$SCRIPTS_DIR/check_prerequisites.sh" --env "GITHUB_USER GITHUB_TOKEN" --tools "uv git curl"
-
-JIRA_ENABLED=false
-if [[ -n "${JIRA_USER_EMAIL:-}" && -n "${JIRA_API_TOKEN:-}" ]]; then
-  JIRA_ENABLED=true
-fi
-
-# ── Fetch component details from Jira ────────────────────────────────────────
-
-WORKDIR=$(mktemp -d)
-trap "rm -rf '$WORKDIR'" EXIT
-
-cd "$WORKDIR"
-
-echo "Fetching Jira issue details..."
-uv run --script "$SCRIPTS_DIR/fetch_jira_details.py" --jira-url "$JIRA_URL" > jira_issue.json
-
-echo "Downloading component_onboarding_details.yaml..."
-uv run --script "$SCRIPTS_DIR/download_jira_attachment.py" \
-  --jira-url "$JIRA_URL" \
-  --filename "component_onboarding_details.yaml" \
-  > component_onboarding_details.yaml
-
-# Parse component details
-COMPONENT_NAME=$(grep -m1 'component_name:' component_onboarding_details.yaml | awk '{print $2}')
-REPO_URL=$(grep -m1 'repo_url:' component_onboarding_details.yaml | awk '{print $2}')
-REPO_BRANCH=$(grep -m1 'repo_branch:' component_onboarding_details.yaml | awk '{print $2}')
-CONTEXT_PATH=$(grep -m1 'context_path:' component_onboarding_details.yaml | awk '{print $2}')
-DOCKERFILE_PATH=$(grep -m1 'dockerfile_path:' component_onboarding_details.yaml | awk '{print $2}')
-
-echo "Component: $COMPONENT_NAME"
-echo "Repo: $REPO_URL @ $REPO_BRANCH"
-echo "Context: $CONTEXT_PATH / $DOCKERFILE_PATH"
-
-# ── Fetch Dockerfile from GitHub ─────────────────────────────────────────────
-
-RAW_BASE="${REPO_URL/github.com/raw.githubusercontent.com}"
-DOCKERFILE_URL="$RAW_BASE/$REPO_BRANCH/$CONTEXT_PATH/$DOCKERFILE_PATH"
-
-echo "Fetching Dockerfile from: $DOCKERFILE_URL"
-if ! curl -sf "$DOCKERFILE_URL" -o Dockerfile.original; then
-  echo "ERROR: Failed to fetch Dockerfile. Check repo_url, repo_branch, context_path, and dockerfile_path."
-  exit 1
-fi
-
-# ── Check for mandatory labels ───────────────────────────────────────────────
-
-MANDATORY_LABELS=(
-  "name"
-  "com.redhat.component"
-  "summary"
-  "description"
-  "maintainer"
-  "io.k8s.display-name"
-  "io.k8s.description"
-)
-
-MISSING_LABELS=()
-for label in "${MANDATORY_LABELS[@]}"; do
-  if ! grep -q "^LABEL.*${label}=" Dockerfile.original; then
-    MISSING_LABELS+=("$label")
-  fi
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --jira-url) JIRA_URL="$2"; shift 2 ;;
+    *)
+      if [[ -z "$JIRA_URL" && "$1" == *"/browse/"* ]]; then
+        JIRA_URL="$1"; shift
+      else
+        echo "Unknown argument: $1" >&2; exit 1
+      fi
+      ;;
+  esac
 done
 
-if [[ ${#MISSING_LABELS[@]} -eq 0 ]]; then
-  echo "✓ All mandatory RHOAI labels are already present. No changes needed."
-  exit 0
+eval "$(bash "$SCRIPTS_DIR/parse_jira_url.sh" "${JIRA_URL:-}")"
+
+# ── Check prerequisites ──────
+bash "$SCRIPTS_DIR/check_prerequisites.sh" \
+  --env "GITHUB_USER GITHUB_TOKEN" \
+  --tools "uv git curl"
+
+if [[ -n "$JIRA_URL" ]]; then
+  bash "$SCRIPTS_DIR/check_prerequisites.sh" \
+    --env "JIRA_USER_EMAIL JIRA_API_TOKEN"
 fi
 
-echo "Missing labels: ${MISSING_LABELS[*]}"
+# ── Set up working directory ──
+eval "$(bash "$SCRIPTS_DIR/init_workdir.sh" --jira-url "${JIRA_URL:-}")"
+echo "Working directory: $WORKDIR"
 
-# ── Parse repository owner and name ──────────────────────────────────────────
-
-REPO_PATH="${REPO_URL#https://github.com/}"
-REPO_OWNER="${REPO_PATH%%/*}"
-REPO_NAME="${REPO_PATH#*/}"
-
-echo "Repository: $REPO_OWNER/$REPO_NAME"
-
-# ── Fork and clone component repository ──────────────────────────────────────
-
-echo "Forking $REPO_OWNER/$REPO_NAME..."
-FORK_URL=$(uv run --script "$SCRIPTS_DIR/setup_github_fork.py" --github-repo-url "$REPO_URL")
-echo "Fork: $FORK_URL"
-
-echo "Cloning fork..."
-git clone "$FORK_URL" component-repo
-cd component-repo
-
-# Add upstream remote
-git remote add upstream "$REPO_URL" 2>/dev/null || true
-
-# ── Create feature branch ─────────────────────────────────────────────────────
-
-BRANCH_NAME="add-rhoai-labels"
-echo "Creating branch: $BRANCH_NAME from upstream/$REPO_BRANCH"
-
-git fetch upstream
-git checkout -b "$BRANCH_NAME" "upstream/$REPO_BRANCH"
-
-# ── Add missing labels to Dockerfile ──────────────────────────────────────────
-
-DOCKERFILE_FULL_PATH="$CONTEXT_PATH/$DOCKERFILE_PATH"
-echo "Editing Dockerfile at: $DOCKERFILE_FULL_PATH"
-
-# Use Python helper to add labels
-uv run --script "$SCRIPTS_DIR/update_dockerfile_labels.py" \
-  --dockerfile "$DOCKERFILE_FULL_PATH" \
-  --component-name "$COMPONENT_NAME" \
-  --missing-labels "${MISSING_LABELS[*]}"
-
-# ── Commit and push ───────────────────────────────────────────────────────────
-
-bash "$SCRIPTS_DIR/git_commit_push.sh" \
-  --clone-dir "$WORKDIR/component-repo" \
-  --files "$DOCKERFILE_FULL_PATH" \
-  --message "Add mandatory RHOAI labels to Dockerfile" \
-  --branch "$BRANCH_NAME" \
-  --remote origin
-
-# ── Raise GitHub PR ───────────────────────────────────────────────────────────
-
-echo "Raising GitHub PR..."
-PR_URL=$(uv run --script "$SCRIPTS_DIR/raise_github_pr.py" \
-  --src-url "$FORK_URL" \
-  --src-branch "$BRANCH_NAME" \
-  --dest-url "$REPO_URL" \
-  --dest-branch "$REPO_BRANCH" \
-  --title "Add mandatory RHOAI labels to Dockerfile" \
-  --description "Adds the following mandatory RHOAI labels to the Dockerfile:
-$(printf '- %s\n' "${MISSING_LABELS[@]}")
-
-Related Jira: $JIRA_URL")
-
-echo "PR raised: $PR_URL"
-
-# ── Update Jira (if enabled) ──────────────────────────────────────────────────
-
-if [[ "$JIRA_ENABLED" == "true" ]]; then
-  echo "Updating Jira..."
-  uv run --script "$SCRIPTS_DIR/update_jira_issue.py" \
-    --jira-url "$JIRA_URL" \
-    --add-labels "dockerfile-labels-pr-raised" \
-    --comment "Dockerfile labels PR raised: $PR_URL"
+# ── Get component YAML ────────
+if [[ -f "$WORKDIR/component_onboarding_details.yaml" ]]; then
+  echo "Using existing component_onboarding_details.yaml."
+elif [[ -n "$JIRA_URL" ]]; then
+  cd "$WORKDIR"
+  uv run --script "$SCRIPTS_DIR/download_jira_attachment.py" \
+    "$JIRA_URL" component_onboarding_details.yaml || {
+    echo "ERROR: Could not download YAML." >&2; exit 1
+  }
 else
-  echo "Jira credentials not provided. Skipping Jira update."
+  echo "ERROR: No YAML found and no Jira URL provided." >&2; exit 1
 fi
 
-echo "✓ Complete. PR: $PR_URL"
+if [[ -n "$JIRA_URL" && ! -f "$WORKDIR/component_onboarding_details.json" ]]; then
+  cd "$WORKDIR"
+  uv run --script "$SCRIPTS_DIR/fetch_jira_details.py" "$JIRA_URL" || true
+fi
+
+# ── Parse YAML ────────────────
+eval "$(bash "$SCRIPTS_DIR/parse_component_details.sh" \
+  --workdir     "$WORKDIR" \
+  --jira-id     "${JIRA_ID:-}" \
+  --scripts-dir "$SCRIPTS_DIR")"
+
+YAML_FILE="$WORKDIR/component_onboarding_details.yaml"
+CONTEXT_PATH=$(grep -m1   'context_path:'     "$YAML_FILE" | awk '{print $2}')
+DOCKERFILE_PATH=$(grep -m1 'dockerfile_path:' "$YAML_FILE" | awk '{print $2}')
+
+for _field in CONTEXT_PATH DOCKERFILE_PATH; do
+  [[ -z "${!_field:-}" ]] && {
+    echo "ERROR: Missing required field '$_field'." >&2; exit 1
+  }
+done
+
+# Derive paths
+CLEAN_CTX="${CONTEXT_PATH#./}"
+if [[ -z "$CLEAN_CTX" || "$CLEAN_CTX" == "." ]]; then
+  DOCKERFILE_REPO_PATH="$DOCKERFILE_PATH"
+else
+  DOCKERFILE_REPO_PATH="${CLEAN_CTX}/${DOCKERFILE_PATH}"
+fi
+
+REPO_PATH=$(echo "$REPO_URL" | sed 's|https://github.com/||;s|\.git$||')
+
+LABEL_NAME="rhoai/${COMPONENT_NAME}-rhel9"
+LABEL_COMPONENT="${COMPONENT_NAME}-rhel9"
+LABEL_DEFAULT="$COMPONENT_NAME"
+
+echo "DOCKERFILE_REPO_PATH: $DOCKERFILE_REPO_PATH"
+echo "Expected name label: $LABEL_NAME"
+
+# ── Fast-path label check ─────
+DOCKERFILE_TMPFILE=$(mktemp)
+HTTP_STATUS=$(curl -s -w "%{http_code}" \
+  -H "Authorization: token $GITHUB_TOKEN" \
+  -H "Accept: application/vnd.github.v3.raw" \
+  "https://api.github.com/repos/${REPO_PATH}/contents/${DOCKERFILE_REPO_PATH}?ref=main" \
+  -o "$DOCKERFILE_TMPFILE" 2>/dev/null || echo "000")
+
+if [[ "$HTTP_STATUS" == "200" ]]; then
+  MISSING_LABELS=""
+  grep -q "name=\"${LABEL_NAME}\"" "$DOCKERFILE_TMPFILE" || MISSING_LABELS="${MISSING_LABELS}name,"
+  grep -q "com.redhat.component=\"${LABEL_COMPONENT}\"" "$DOCKERFILE_TMPFILE" || MISSING_LABELS="${MISSING_LABELS}com.redhat.component,"
+  grep -q "summary=\"${LABEL_DEFAULT}\"" "$DOCKERFILE_TMPFILE" || MISSING_LABELS="${MISSING_LABELS}summary,"
+  grep -q "description=\"${LABEL_DEFAULT}\"" "$DOCKERFILE_TMPFILE" || MISSING_LABELS="${MISSING_LABELS}description,"
+  grep -q "maintainer=\"${LABEL_DEFAULT}\"" "$DOCKERFILE_TMPFILE" || MISSING_LABELS="${MISSING_LABELS}maintainer,"
+  grep -q "io.k8s.display-name=\"${LABEL_DEFAULT}\"" "$DOCKERFILE_TMPFILE" || MISSING_LABELS="${MISSING_LABELS}io.k8s.display-name,"
+  grep -q "io.k8s.description=\"${LABEL_DEFAULT}\"" "$DOCKERFILE_TMPFILE" || MISSING_LABELS="${MISSING_LABELS}io.k8s.description,"
+
+  if [[ -z "$MISSING_LABELS" ]]; then
+    echo "All 7 mandatory RHOAI labels are already correct."
+    if [[ -n "$JIRA_URL" ]]; then
+      uv run --script "$SCRIPTS_DIR/update_jira_issue.py" "$JIRA_URL" \
+        --add-label "dockerfile-labels-present" \
+        --comment "All mandatory RHOAI Dockerfile labels are already present in ${DOCKERFILE_REPO_PATH}. No changes needed."
+    fi
+    rm -f "$DOCKERFILE_TMPFILE"
+    exit 0
+  fi
+
+  echo "Missing/incorrect labels: ${MISSING_LABELS%,}"
+fi
+rm -f "$DOCKERFILE_TMPFILE"
+
+# ── Set up playpen ────────────
+cd "$WORKDIR"
+PLAYPEN_OUTPUT=$(bash "$SCRIPTS_DIR/setup_github_playpen.sh" \
+  --src-url "$REPO_URL" \
+  --dest-url "$REPO_URL" \
+  --src-branch main \
+  ${JIRA_ID:+--dest-branch "$JIRA_ID"} \
+  --sparse-files "$DOCKERFILE_REPO_PATH") || {
+  echo "ERROR: Clone or push failed." >&2; exit 1
+}
+
+CLONE_DIR=$(echo "$PLAYPEN_OUTPUT" | head -1)
+DEST_BRANCH=$(echo "$PLAYPEN_OUTPUT" | tail -1)
+
+# ── Add labels ────────────────
+[[ -f "$CLONE_DIR/$DOCKERFILE_REPO_PATH" ]] || {
+  echo "ERROR: Dockerfile not found at $CLONE_DIR/$DOCKERFILE_REPO_PATH." >&2; exit 1
+}
+
+uv run --script "$SCRIPTS_DIR/update_dockerfile_labels.py" \
+  "$CLONE_DIR/$DOCKERFILE_REPO_PATH" \
+  --name      "$LABEL_NAME" \
+  --component "$LABEL_COMPONENT" \
+  --default   "$LABEL_DEFAULT" || {
+  echo "ERROR: Could not update Dockerfile labels." >&2; exit 1
+}
+
+grep -q "name=\"${LABEL_NAME}\"" "$CLONE_DIR/$DOCKERFILE_REPO_PATH" || {
+  echo "ERROR: Verification failed." >&2; exit 1
+}
+echo "All mandatory RHOAI labels confirmed present."
+
+# ── Commit and push ───────────
+bash "$SCRIPTS_DIR/git_commit_push.sh" \
+  --clone-dir "$CLONE_DIR" \
+  --files     "$DOCKERFILE_REPO_PATH" \
+  --message   "Add mandatory RHOAI Dockerfile labels for $COMPONENT_NAME
+
+Adds the required OCI/Red Hat labels to $DOCKERFILE_REPO_PATH.
+
+Related: ${JIRA_ID:-no-jira}" \
+  --branch    "$DEST_BRANCH" || {
+  echo "ERROR: Could not push." >&2; exit 1
+}
+
+# ── Raise PR (up to 3 attempts) ──
+MAX_ATTEMPTS=3
+for attempt in $(seq 1 $MAX_ATTEMPTS); do
+  PR_URL=$(uv run --script "$SCRIPTS_DIR/raise_github_pr.py" \
+    --src-url "$REPO_URL" \
+    --src-branch "$DEST_BRANCH" \
+    --dest-url "$REPO_URL" \
+    --dest-branch main \
+    --title "Add mandatory RHOAI Dockerfile labels for $COMPONENT_NAME" \
+    --description "Adds the seven mandatory RHOAI OCI labels to \`${DOCKERFILE_REPO_PATH}\`.
+
+| Label | Value |
+|-------|-------|
+| \`name\` | \`${LABEL_NAME}\` |
+| \`com.redhat.component\` | \`${LABEL_COMPONENT}\` |
+| \`summary\` | \`${LABEL_DEFAULT}\` |
+| \`description\` | \`${LABEL_DEFAULT}\` |
+| \`maintainer\` | \`${LABEL_DEFAULT}\` |
+| \`io.k8s.display-name\` | \`${LABEL_DEFAULT}\` |
+| \`io.k8s.description\` | \`${LABEL_DEFAULT}\` |
+
+**Jira:** ${JIRA_URL:-(none)}" 2>&1) && break
+
+  echo "PR creation attempt $attempt failed: $PR_URL"
+  if [[ $attempt -eq $MAX_ATTEMPTS ]]; then
+    echo "ERROR: Could not create PR after $MAX_ATTEMPTS attempts." >&2; exit 1
+  fi
+  sleep 5
+done
+
+# ── Jira update ───────────────
+if [[ -n "$JIRA_URL" ]]; then
+  uv run --script "$SCRIPTS_DIR/update_jira_issue.py" "$JIRA_URL" \
+    --add-label "dockerfile-labels-pr-raised" \
+    --comment "GitHub PR raised to add mandatory RHOAI Dockerfile labels for '$COMPONENT_NAME'.
+
+PR URL: $PR_URL
+File changed: $DOCKERFILE_REPO_PATH"
+fi
+
+echo ""
+echo "Done."
+echo "  PR raised: $PR_URL"

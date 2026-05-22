@@ -91,7 +91,7 @@ Use the JSON Schema validator to check the YAML structure.
       component_onboarding_details.yaml \
       /path/to/component_onboarding_details.schema.json
 
-The schema file is located at `.claude/skills/validate-component-onboarding-jira/assets/component_onboarding_details.schema.json` in this repository.
+The schema file is located at `playbooks/assets/component_onboarding_details.schema.json` in this repository.
 
 If validation fails, review the error messages, correct the YAML, and re-validate.
 

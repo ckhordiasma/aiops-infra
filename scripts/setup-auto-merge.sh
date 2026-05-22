@@ -1,267 +1,271 @@
 #!/usr/bin/env bash
-# setup-auto-merge.sh — Configures auto-merge for component Konflux CI PRs
+# setup-auto-merge.sh — Configure auto-merge for a component repo in rhods-devops-infra
 #
 # Usage:
-#   ./scripts/setup-auto-merge.sh <component-name> [<jira-url>] [--existing-pr-url <url>]
+#   ./scripts/setup-auto-merge.sh [--jira-url <url>] [--existing-pr-url <url>]
 #
 # Required env vars:
 #   GITHUB_USER, GITHUB_TOKEN
 #
-# Optional env vars (when jira-url provided):
+# Required when --jira-url is provided:
 #   JIRA_USER_EMAIL, JIRA_API_TOKEN
 #
-# Optional env vars:
-#   RHODS_DEVOPS_INFRA_REPO_URL (default: https://github.com/red-hat-data-services/rhods-devops-infra.git)
-#   JIRA_SERVER (default: https://redhat.atlassian.net)
+# Optional:
+#   RHODS_DEVOPS_INFRA_REPO_URL — override default repo URL
 
 set -euo pipefail
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# ── Parse inputs ──────────────────────────────────────────────────────────────
-
-COMPONENT_NAME=""
+# ── Parse inputs ──────────────
 JIRA_URL=""
+JIRA_ID=""
 EXISTING_PR_URL=""
 
 while [[ $# -gt 0 ]]; do
-  case $1 in
-    --existing-pr-url)
-      EXISTING_PR_URL="$2"
-      shift 2
-      ;;
+  case "$1" in
+    --jira-url)        JIRA_URL="$2"; shift 2 ;;
+    --existing-pr-url) EXISTING_PR_URL="$2"; shift 2 ;;
     *)
-      if [[ -z "$COMPONENT_NAME" ]]; then
-        COMPONENT_NAME="$1"
-      elif [[ -z "$JIRA_URL" ]]; then
-        JIRA_URL="$1"
+      if [[ -z "$JIRA_URL" && "$1" == *"/browse/"* ]]; then
+        JIRA_URL="$1"; shift
       else
-        echo "ERROR: Unexpected argument '$1'"
-        exit 1
+        echo "Unknown argument: $1" >&2; exit 1
       fi
-      shift
       ;;
   esac
 done
 
-[[ -z "$COMPONENT_NAME" ]] && {
-  echo "Usage: $0 <component-name> [<jira-url>] [--existing-pr-url <url>]"
-  exit 1
-}
-
-# Idempotency fast-path
 if [[ -n "$EXISTING_PR_URL" ]]; then
   echo "PR already raised: $EXISTING_PR_URL"
   exit 0
 fi
 
-# Parse Jira URL (if provided)
-JIRA_ID=""
-if [[ -n "$JIRA_URL" ]]; then
-  eval "$(bash "$SCRIPTS_DIR/parse_jira_url.sh" "$JIRA_URL")"
-  echo "JIRA_URL : $JIRA_URL"
-  echo "JIRA_ID  : $JIRA_ID"
+if [[ -n "$JIRA_URL" && "$JIRA_URL" != *"/browse/"* ]]; then
+  echo "ERROR: Invalid Jira URL." >&2; exit 1
 fi
+[[ -n "$JIRA_URL" ]] && JIRA_ID="${JIRA_URL##*/}"
 
-echo "COMPONENT_NAME : $COMPONENT_NAME"
+RDI_URL="${RHODS_DEVOPS_INFRA_REPO_URL:-https://github.com/red-hat-data-services/rhods-devops-infra.git}"
+echo "RDI_URL resolved to: $RDI_URL"
+RDI_PATH=$(echo "$RDI_URL" | sed 's|https://github.com/||;s|\.git$||')
 
-# ── Check prerequisites ───────────────────────────────────────────────────────
-
-bash "$SCRIPTS_DIR/check_prerequisites.sh" --env "GITHUB_USER GITHUB_TOKEN" --tools "uv git gh"
-
-if [[ -n "$JIRA_URL" ]]; then
-  bash "$SCRIPTS_DIR/check_prerequisites.sh" --env "JIRA_USER_EMAIL JIRA_API_TOKEN"
-fi
-
-# ── Set up working directory ──────────────────────────────────────────────────
+# ── Check prerequisites ──────
+bash "$SCRIPTS_DIR/check_prerequisites.sh" \
+  --env "GITHUB_USER GITHUB_TOKEN" \
+  --tools "uv git curl"
 
 if [[ -n "$JIRA_URL" ]]; then
-  eval "$(bash "$SCRIPTS_DIR/init_workdir.sh" --jira-url "$JIRA_URL")"
-else
-  WORKDIR="/tmp/setup-auto-merge-${COMPONENT_NAME}-$$"
-  mkdir -p "$WORKDIR"
+  bash "$SCRIPTS_DIR/check_prerequisites.sh" \
+    --env "JIRA_USER_EMAIL JIRA_API_TOKEN"
 fi
 
+# ── Set up working directory ──
+eval "$(bash "$SCRIPTS_DIR/init_workdir.sh" --jira-url "${JIRA_URL:-}")"
 echo "Working directory: $WORKDIR"
 
-# ── Get component YAML (if Jira provided) ─────────────────────────────────────
-
-if [[ -n "$JIRA_URL" && ! -f "$WORKDIR/component_onboarding_details.yaml" ]]; then
+# ── Get component YAML ────────
+if [[ -f "$WORKDIR/component_onboarding_details.yaml" ]]; then
+  echo "Using existing component_onboarding_details.yaml."
+elif [[ -n "$JIRA_URL" ]]; then
   cd "$WORKDIR"
   uv run --script "$SCRIPTS_DIR/download_jira_attachment.py" \
     "$JIRA_URL" component_onboarding_details.yaml || {
-    echo "WARN: Could not download component_onboarding_details.yaml from Jira."
-    echo "  Continuing with provided component name."
+    echo "ERROR: Could not download YAML." >&2; exit 1
   }
-fi
-
-# ── Parse component repository URL (if YAML available) ────────────────────────
-
-COMPONENT_REPO_URL=""
-if [[ -f "$WORKDIR/component_onboarding_details.yaml" ]]; then
-  YAML_FILE="$WORKDIR/component_onboarding_details.yaml"
-  COMPONENT_REPO_URL=$(grep -m1 'repo_url:' "$YAML_FILE" | awk '{print $2}' || echo "")
-fi
-
-# Extract owner/repo from URL
-if [[ -n "$COMPONENT_REPO_URL" ]]; then
-  COMPONENT_REPO_PATH=$(echo "$COMPONENT_REPO_URL" | sed 's|https://github.com/||;s|\.git$||')
-  REPO_OWNER=$(echo "$COMPONENT_REPO_PATH" | cut -d/ -f1)
-  REPO_NAME=$(echo "$COMPONENT_REPO_PATH" | cut -d/ -f2)
 else
-  # Default to red-hat-data-services
-  REPO_OWNER="red-hat-data-services"
-  REPO_NAME="$COMPONENT_NAME"
-  COMPONENT_REPO_PATH="$REPO_OWNER/$REPO_NAME"
+  echo "ERROR: No YAML found and no Jira URL provided." >&2; exit 1
 fi
 
-echo "COMPONENT_REPO   : $COMPONENT_REPO_PATH"
+if [[ -n "$JIRA_URL" && ! -f "$WORKDIR/component_onboarding_details.json" ]]; then
+  cd "$WORKDIR"
+  uv run --script "$SCRIPTS_DIR/fetch_jira_details.py" "$JIRA_URL" || true
+fi
 
-# ── Resolve devops infra repository URL ──────────────────────────────────────
+# ── Parse YAML ────────────────
+REPO_URL=$(grep -m1 'repo_url:' "$WORKDIR/component_onboarding_details.yaml" | awk '{print $2}')
+[[ -z "$REPO_URL" ]] && {
+  echo "ERROR: Missing 'repo_url' field." >&2; exit 1
+}
 
-DEVOPS_INFRA_URL="${RHODS_DEVOPS_INFRA_REPO_URL:-https://github.com/red-hat-data-services/rhods-devops-infra.git}"
-DEVOPS_INFRA_PATH=$(echo "$DEVOPS_INFRA_URL" | sed 's|https://github.com/||;s|\.git$||')
+REPO_NAME="${REPO_URL##*/}"
+REPO_NAME="${REPO_NAME%.git}"
 
-echo "DEVOPS_INFRA_URL : $DEVOPS_INFRA_URL"
-echo "DEVOPS_INFRA_PATH: $DEVOPS_INFRA_PATH"
+eval "$(bash "$SCRIPTS_DIR/detect_repo_upstream.sh" --repo-url "$REPO_URL")"
 
-# ── Set up GitHub playpen (fork + clone) ──────────────────────────────────────
+echo "REPO_NAME        : $REPO_NAME"
+echo "REPO_URL         : $REPO_URL"
+echo "UPSTREAM_REPO_URL: $UPSTREAM_REPO_URL"
 
+# ── Fast-path check ───────────
+fetch_file_content() {
+  local path="$1"
+  curl -s \
+    -H "Authorization: token $GITHUB_TOKEN" \
+    -H "Accept: application/vnd.github.v3+json" \
+    "https://api.github.com/repos/${RDI_PATH}/contents/${path}?ref=main" \
+    | python3 -c \
+      "import sys,json,base64; d=json.load(sys.stdin); print(base64.b64decode(d['content']).decode())" \
+      2>/dev/null || true
+}
+
+USM_CONTENT=$(fetch_file_content "src/config/upstream-source-map.yaml")
+MRSM_CONTENT=$(fetch_file_content "src/config/main-release-source-map.yaml")
+
+USM_HAS_ENTRY=false
+MRSM_HAS_ENTRY=false
+[[ -n "$USM_CONTENT" ]] && echo "$USM_CONTENT" | grep -qF "name: ${REPO_NAME}" && USM_HAS_ENTRY=true
+[[ -n "$MRSM_CONTENT" ]] && echo "$MRSM_CONTENT" | grep -qF "name: ${REPO_NAME}" && MRSM_HAS_ENTRY=true
+
+if [[ "$USM_HAS_ENTRY" == "true" && "$MRSM_HAS_ENTRY" == "true" ]]; then
+  echo "Entry '${REPO_NAME}' already exists in both config files. Nothing to do."
+  if [[ -n "$JIRA_URL" ]]; then
+    uv run --script "$SCRIPTS_DIR/update_jira_issue.py" "$JIRA_URL" \
+      --add-label "auto-merge-setup-done" \
+      --comment "Auto-merge config for '${REPO_NAME}' already exists in ${RDI_PATH}."
+  fi
+  exit 0
+fi
+
+# ── Set up playpen ────────────
 cd "$WORKDIR"
 
-BRANCH_NAME="${JIRA_ID:-setup-auto-merge-${COMPONENT_NAME}}"
+PLAYPEN_ARGS=(
+  --src-url "$RDI_URL"
+  --src-branch "main"
+  --sparse-files "src/config .github/workflows"
+)
+[[ -n "$JIRA_ID" ]] && PLAYPEN_ARGS+=(--dest-branch "$JIRA_ID")
 
-PLAYPEN_OUTPUT=$(bash "$SCRIPTS_DIR/setup_github_playpen.sh" \
-  --src-url "$DEVOPS_INFRA_URL" \
-  --dest-url "$DEVOPS_INFRA_URL" \
-  --src-branch main \
-  --dest-branch "$BRANCH_NAME") || {
-  echo "ERROR: Playpen setup failed. See details above."
-  echo "  Check GITHUB_TOKEN has 'repo' scope and fork/clone access."
-  exit 1
+PLAYPEN_OUTPUT=$(bash "$SCRIPTS_DIR/setup_github_playpen.sh" "${PLAYPEN_ARGS[@]}") || {
+  echo "ERROR: Clone or push failed." >&2; exit 1
 }
 
 CLONE_DIR=$(echo "$PLAYPEN_OUTPUT" | head -1)
 DEST_BRANCH=$(echo "$PLAYPEN_OUTPUT" | tail -1)
 
-echo "Clone directory: $CLONE_DIR"
-echo "Branch: $DEST_BRANCH"
+# ── Edit four target files ────
 
-# ── Locate auto-merge configuration file ─────────────────────────────────────
+# 6a. upstream-source-map.yaml
+USM_FILE="$CLONE_DIR/src/config/upstream-source-map.yaml"
+[[ -f "$USM_FILE" ]] || { echo "ERROR: upstream-source-map.yaml not found." >&2; exit 1; }
 
-CONFIG_FILE=""
-for candidate in "auto-merge-config.yaml" "config/auto-merge.yaml" ".github/auto-merge.yaml"; do
-  if [[ -f "$CLONE_DIR/$candidate" ]]; then
-    CONFIG_FILE="$CLONE_DIR/$candidate"
-    break
-  fi
-done
-
-if [[ -z "$CONFIG_FILE" ]]; then
-  echo "ERROR: Could not locate auto-merge configuration file in $CLONE_DIR."
-  echo "  Checked: auto-merge-config.yaml, config/auto-merge.yaml, .github/auto-merge.yaml"
-  echo "  The repository structure may have changed. Update this script accordingly."
-  exit 1
-fi
-
-echo "Config file: $CONFIG_FILE"
-
-# ── Check if component already configured ─────────────────────────────────────
-
-if grep -qF "$COMPONENT_NAME" "$CONFIG_FILE"; then
-  echo "'$COMPONENT_NAME' already configured in auto-merge config — skipping edit."
-else
-  # Add component to auto-merge configuration
-  # Note: This is a simplified example - actual format depends on the config file structure
-
-  cat >> "$CONFIG_FILE" <<EOF
-
-  - name: ${COMPONENT_NAME}
-    owner: ${REPO_OWNER}
-    repo: ${REPO_NAME}
-    auto_merge:
-      enabled: true
-      required_checks:
-        - konflux-ci
-        - build-and-test
-      merge_method: squash
+if ! grep -qF "name: ${REPO_NAME}" "$USM_FILE"; then
+  cat >> "$USM_FILE" <<EOF
+- name: ${REPO_NAME}
+  automerge: 'yes'
+  src:
+    url: ${UPSTREAM_REPO_URL}.git
+    branch: main
+  dest:
+    url: ${REPO_URL}.git
+    branch: main
 EOF
-
-  echo "Auto-merge configuration added for '$COMPONENT_NAME'."
+  grep -qF "name: ${REPO_NAME}" "$USM_FILE" || {
+    echo "ERROR: Verification failed for upstream-source-map.yaml." >&2; exit 1
+  }
+  echo "${REPO_NAME} added to upstream-source-map.yaml."
 fi
 
-# ── Commit and push ───────────────────────────────────────────────────────────
+# 6b. main-release-source-map.yaml
+MRSM_FILE="$CLONE_DIR/src/config/main-release-source-map.yaml"
+[[ -f "$MRSM_FILE" ]] || { echo "ERROR: main-release-source-map.yaml not found." >&2; exit 1; }
 
-CONFIG_FILE_REL=$(realpath --relative-to="$CLONE_DIR" "$CONFIG_FILE")
+if ! grep -qF "name: ${REPO_NAME}" "$MRSM_FILE"; then
+  cat >> "$MRSM_FILE" <<EOF
+- name: ${REPO_NAME}
+  automerge: 'yes'
+  repo-url: ${REPO_URL}.git
+EOF
+  grep -qF "name: ${REPO_NAME}" "$MRSM_FILE" || {
+    echo "ERROR: Verification failed for main-release-source-map.yaml." >&2; exit 1
+  }
+  echo "${REPO_NAME} added to main-release-source-map.yaml."
+fi
 
+# 6c. upstream-auto-merge.yaml
+UAM_FILE="$CLONE_DIR/.github/workflows/upstream-auto-merge.yaml"
+[[ -f "$UAM_FILE" ]] || { echo "ERROR: upstream-auto-merge.yaml not found." >&2; exit 1; }
+
+if ! grep -qF "${REPO_NAME}" "$UAM_FILE"; then
+  OPTIONS_LINE=$(grep -n 'repositories:' "$UAM_FILE" | head -1 | cut -d: -f1)
+  OPTIONS_START=$(awk -v start="$OPTIONS_LINE" 'NR>start && /options:/{print NR; exit}' "$UAM_FILE")
+  INDENT=$(awk -v start="$OPTIONS_START" 'NR>start && /^\s*- /{match($0,/^[[:space:]]*/); print substr($0,1,RLENGTH); exit}' "$UAM_FILE")
+  LAST_OPT=$(awk -v start="$OPTIONS_START" -v indent="$INDENT" \
+    'NR>start { if ($0 ~ "^" indent "- ") last=NR; else if (last) { print last; exit } } END { if (last) print last }' "$UAM_FILE")
+  awk -v line="$LAST_OPT" -v entry="${INDENT}- ${REPO_NAME}" \
+    'NR==line{print; print entry; next}1' "$UAM_FILE" > "${UAM_FILE}.tmp" && mv "${UAM_FILE}.tmp" "$UAM_FILE"
+  echo "${REPO_NAME} added to upstream-auto-merge.yaml."
+fi
+
+# 6d. main-release-auto-merge.yaml
+MRAM_FILE="$CLONE_DIR/.github/workflows/main-release-auto-merge.yaml"
+[[ -f "$MRAM_FILE" ]] || { echo "ERROR: main-release-auto-merge.yaml not found." >&2; exit 1; }
+
+if ! grep -qF "${REPO_NAME}" "$MRAM_FILE"; then
+  OPTIONS_LINE=$(grep -n 'repositories:' "$MRAM_FILE" | head -1 | cut -d: -f1)
+  OPTIONS_START=$(awk -v start="$OPTIONS_LINE" 'NR>start && /options:/{print NR; exit}' "$MRAM_FILE")
+  INDENT=$(awk -v start="$OPTIONS_START" 'NR>start && /^\s*- /{match($0,/^[[:space:]]*/); print substr($0,1,RLENGTH); exit}' "$MRAM_FILE")
+  LAST_OPT=$(awk -v start="$OPTIONS_START" -v indent="$INDENT" \
+    'NR>start { if ($0 ~ "^" indent "- ") last=NR; else if (last) { print last; exit } } END { if (last) print last }' "$MRAM_FILE")
+  awk -v line="$LAST_OPT" -v entry="${INDENT}- ${REPO_NAME}" \
+    'NR==line{print; print entry; next}1' "$MRAM_FILE" > "${MRAM_FILE}.tmp" && mv "${MRAM_FILE}.tmp" "$MRAM_FILE"
+  echo "${REPO_NAME} added to main-release-auto-merge.yaml."
+fi
+
+# ── Commit and push ───────────
 bash "$SCRIPTS_DIR/git_commit_push.sh" \
   --clone-dir "$CLONE_DIR" \
-  --files "$CONFIG_FILE_REL" \
-  --message "Enable auto-merge for ${COMPONENT_NAME}
+  --files     "src/config/upstream-source-map.yaml src/config/main-release-source-map.yaml .github/workflows/upstream-auto-merge.yaml .github/workflows/main-release-auto-merge.yaml" \
+  --message   "Configure auto-merge for ${REPO_NAME}
 
-Configures auto-merge for ${COMPONENT_NAME} Konflux CI pull requests.
+Adds '${REPO_NAME}' to upstream and main-release source maps
+and registers it in both auto-merge workflows.
 
-Component: ${COMPONENT_NAME}
-Repository: ${COMPONENT_REPO_PATH}
-
-Related: ${JIRA_ID:-(none)}" \
-  --branch "$DEST_BRANCH" || {
-  echo "ERROR: Could not push branch '$DEST_BRANCH'. See details above."
-  exit 1
+Related: ${JIRA_ID:-no-jira}" \
+  --branch    "$DEST_BRANCH" || {
+  echo "ERROR: Could not push." >&2; exit 1
 }
 
-# ── Raise PR ──────────────────────────────────────────────────────────────────
-
-PR_DESCRIPTION="Configures auto-merge for ${COMPONENT_NAME} Konflux CI pull requests.
-
-## Component details
+# ── Raise PR (up to 3 attempts) ──
+MAX_ATTEMPTS=3
+for attempt in $(seq 1 $MAX_ATTEMPTS); do
+  PR_URL=$(uv run --script "$SCRIPTS_DIR/raise_github_pr.py" \
+    --src-url "$RDI_URL" \
+    --src-branch "$DEST_BRANCH" \
+    --dest-url "$RDI_URL" \
+    --dest-branch "main" \
+    --title "Configure auto-merge for ${REPO_NAME}" \
+    --description "Sets up auto-merge for \`${REPO_NAME}\` in ${RDI_PATH}.
 
 | Field | Value |
 |-------|-------|
-| \`component_name\` | \`${COMPONENT_NAME}\` |
-| \`repository\` | \`${COMPONENT_REPO_PATH}\` |
+| Component repo  | \`${REPO_URL}\` |
+| Upstream repo   | \`${UPSTREAM_REPO_URL}\` |
 
-**File changed:** \`${CONFIG_FILE_REL}\`"
+**Files changed:**
+- \`src/config/upstream-source-map.yaml\`
+- \`src/config/main-release-source-map.yaml\`
+- \`.github/workflows/upstream-auto-merge.yaml\`
+- \`.github/workflows/main-release-auto-merge.yaml\`
 
-if [[ -n "$JIRA_URL" ]]; then
-  PR_DESCRIPTION="${PR_DESCRIPTION}
-**Jira:** $JIRA_URL"
-fi
+**Jira:** ${JIRA_URL:-(none)}" 2>&1) && break
 
-PR_URL=$(uv run --script "$SCRIPTS_DIR/raise_github_pr.py" \
-  --src-url "$DEVOPS_INFRA_URL" \
-  --src-branch "$DEST_BRANCH" \
-  --dest-url "$DEVOPS_INFRA_URL" \
-  --dest-branch main \
-  --title "Enable auto-merge for ${COMPONENT_NAME}" \
-  --description "$PR_DESCRIPTION") || {
-  echo "ERROR: Could not create PR."
-  exit 1
-}
+  echo "PR creation attempt $attempt failed: $PR_URL"
+  if [[ $attempt -eq $MAX_ATTEMPTS ]]; then
+    echo "ERROR: Could not create PR after $MAX_ATTEMPTS attempts." >&2; exit 1
+  fi
+  sleep 5
+done
 
-echo "PR raised: $PR_URL"
-
-# ── Jira updates (if applicable) ──────────────────────────────────────────────
-
+# ── Jira update ───────────────
 if [[ -n "$JIRA_URL" ]]; then
   uv run --script "$SCRIPTS_DIR/update_jira_issue.py" "$JIRA_URL" \
     --add-label "auto-merge-pr-raised" \
-    --comment "[step:auto_merge] GitHub PR raised to enable auto-merge for '${COMPONENT_NAME}'.
+    --comment "GitHub PR raised to configure auto-merge for '${REPO_NAME}' in ${RDI_PATH}.
 
-PR URL: $PR_URL
-
-File changed: ${CONFIG_FILE_REL}
-Repository: ${COMPONENT_REPO_PATH}
-
-Auto-merge will be active for Konflux CI PRs once the configuration is merged."
+PR URL: $PR_URL"
 fi
-
-# ── Done ──────────────────────────────────────────────────────────────────────
 
 echo ""
 echo "Done."
-echo ""
-echo "  ${CONFIG_FILE_REL}   — ${COMPONENT_NAME} auto-merge configured"
-echo "  GitHub PR                    : $PR_URL"
-if [[ -n "$JIRA_URL" ]]; then
-  echo "  Jira                         : ${JIRA_ID} — label: auto-merge-pr-raised"
-fi
+echo "  PR raised: $PR_URL"

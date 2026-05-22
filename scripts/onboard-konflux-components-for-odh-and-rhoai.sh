@@ -1,77 +1,67 @@
 #!/usr/bin/env bash
-# onboard-konflux-components-for-odh-and-rhoai.sh — Master orchestrator for component onboarding
+# onboard-konflux-components-for-odh-and-rhoai.sh — Master orchestrator for the full ODH/RHOAI
+# component onboarding pipeline. Idempotent — run any number of times for the same Jira.
 #
 # Usage:
 #   ./scripts/onboard-konflux-components-for-odh-and-rhoai.sh <jira-url>
 #
 # Required env vars:
-#   GITHUB_USER, GITHUB_TOKEN, GITLAB_USER, GITLAB_TOKEN
 #   JIRA_USER_EMAIL, JIRA_API_TOKEN
+#   GITHUB_USER, GITHUB_TOKEN
+#   GITLAB_USER, GITLAB_TOKEN
 #
-# This orchestrator calls the individual step scripts in order,
-# tracking state in pipeline_state.json for idempotent resume.
+# Optional env vars:
+#   EXT_OC_TOKEN, INT_OC_TOKEN
+#   APP_INTERFACE_REPO_URL, KONFLUX_RELEASE_DATA_REPO_URL,
+#   ODH_KONFLUX_CENTRAL_REPO_URL, ODH_OPERATOR_REPO_URL, OBC_REPO_URL,
+#   RHOAI_KONFLUX_CENTRAL_REPO_URL, PYXIS_REPO_CONFIGS_REPO_URL,
+#   RHODS_DEVOPS_INFRA_REPO_URL, JIRA_SERVER
 
 set -euo pipefail
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# ============================================================================
-# Step 0: Parse Inputs
-# ============================================================================
+# Track whether any new PRs/MRs were raised this run
+NEW_PRS_RAISED="false"
 
+# ─── Step 0: Parse Inputs ───────────────────────────────────────────────────
 eval "$(bash "$SCRIPTS_DIR/parse_jira_url.sh" "${1:-}")"
 [[ -z "$JIRA_URL" ]] && {
   echo "ERROR: Jira URL is required."
-  echo "  Usage: $0 <jira-url>"
+  echo "  Usage: ./scripts/onboard-konflux-components-for-odh-and-rhoai.sh <jira-url>"
   exit 1
 }
 echo "Jira ID  : $JIRA_ID"
 echo "Jira URL : $JIRA_URL"
 
-# ============================================================================
-# Step 1: Check Prerequisites
-# ============================================================================
-
+# ─── Step 1: Check Prerequisites ────────────────────────────────────────────
 bash "$SCRIPTS_DIR/check_prerequisites.sh" \
   --env "JIRA_USER_EMAIL JIRA_API_TOKEN GITLAB_USER GITLAB_TOKEN GITHUB_USER GITHUB_TOKEN" \
   --tools "uv git oc skopeo yamllint jq kustomize"
 
 [[ -x "${HOME}/.local/bin/kustomize" ]] && export PATH="${HOME}/.local/bin:${PATH}"
 
-# ============================================================================
-# Step 2: Set Up Working Directory and Initialize State
-# ============================================================================
-
+# ─── Step 2: Set Up Working Directory and Initialize State ──────────────────
 eval "$(bash "$SCRIPTS_DIR/init_pipeline.sh" --jira-url "$JIRA_URL")"
 echo "Working directory: $WORKDIR"
 echo "Pipeline state: $PIPELINE_STATE"
 
-# ============================================================================
-# Step 3: Sub-skill — validate-component-onboarding-jira
-# ============================================================================
-
+# ─── Step 3: Validate Jira (sub-skill) ──────────────────────────────────────
 VALIDATE_STATUS=$(jq -r '.steps.validate.status // "pending"' "$PIPELINE_STATE")
-if [[ "$VALIDATE_STATUS" == "done" ]]; then
-  echo "[orchestrator] Step 3 (validate-component-onboarding-jira) already done — skipping"
-else
+if [[ "$VALIDATE_STATUS" != "done" ]]; then
   echo "[orchestrator] Running validate-component-onboarding-jira..."
-
-  # Call the validate script
-  bash "$SCRIPTS_DIR/validate-component-onboarding-jira.sh" "$JIRA_URL" || {
-    echo "ERROR in Step 3 (validate-component-onboarding-jira): Validation failed. Aborting."
+  if bash "$SCRIPTS_DIR/validate-component-onboarding-jira.sh" "$JIRA_URL" --workdir "$WORKDIR"; then
+    bash "$SCRIPTS_DIR/pipeline_state.sh" set \
+      --state "$PIPELINE_STATE" --step validate --field status --value "done"
+    echo "[orchestrator] Validation complete."
+  else
+    echo "ERROR: Validation failed. Fix the Jira YAML and re-run."
     exit 1
-  }
-
-  # Mark step as done
-  bash "$SCRIPTS_DIR/pipeline_state.sh" set \
-    --state "$PIPELINE_STATE" --step validate --field status --value "done"
+  fi
+else
+  echo "[orchestrator] Validation already done — skipping."
 fi
 
-# ============================================================================
-# Step 4: Parse Component Details and Derive Computed Variables
-# ============================================================================
-
-COMPONENT_NAME_IN_STATE=$(jq -r '.component_name // ""' "$PIPELINE_STATE")
-
+# ─── Step 4: Parse Component Details ────────────────────────────────────────
 eval "$(bash "$SCRIPTS_DIR/parse_component_details.sh" \
   --workdir        "$WORKDIR" \
   --jira-id        "$JIRA_ID" \
@@ -80,8 +70,10 @@ eval "$(bash "$SCRIPTS_DIR/parse_component_details.sh" \
   echo "ERROR in Step 4 (Parse Component Details): Could not parse YAML or derive PRODUCT_CONTEXT. Aborting."
   exit 1
 }
+# Sets: COMPONENT_NAME IS_OPERATOR REPO_URL REPO_BRANCH
+#       PRODUCT_CONTEXT QUAY_ORG QUAY_VISIBILITY QUAY_REPO_URI
 
-# Update the state schema for any steps not yet in the file
+# Re-init state with full context (handles old state files missing new steps)
 bash "$SCRIPTS_DIR/init_pipeline.sh" \
   --jira-url         "$JIRA_URL" \
   --workdir-override "$WORKDIR" \
@@ -90,47 +82,43 @@ bash "$SCRIPTS_DIR/init_pipeline.sh" \
   --is-operator      "$IS_OPERATOR" \
   > /dev/null
 
-# ============================================================================
-# Step 5: Sync State from Jira Labels
-# ============================================================================
+echo "Component : $COMPONENT_NAME"
+echo "Product   : $PRODUCT_CONTEXT"
 
+# ─── Step 5: Sync State from Jira Labels ────────────────────────────────────
 echo "[orchestrator] Syncing state from Jira labels..."
 uv run --script "$SCRIPTS_DIR/sync_state_from_jira.py" \
   --jira-details   "$WORKDIR/component_onboarding_details.json" \
   --pipeline-state "$PIPELINE_STATE" || {
-  echo "WARNING: sync_state_from_jira.py failed — continuing anyway"
+  echo "WARNING: Jira label sync failed — continuing with local state."
 }
 
-# ============================================================================
-# Step 6: Check Current PR/MR Status
-# ============================================================================
-
-echo "[orchestrator] Checking PR/MR status..."
+# ─── Step 6: Check Current PR/MR Status ─────────────────────────────────────
+echo "[orchestrator] Checking PR/MR merge status..."
 NEWLY_MERGED=$(bash "$SCRIPTS_DIR/check_pr_mr_status.sh" \
-  --state      "$PIPELINE_STATE" \
-  --scripts-dir "$SCRIPTS_DIR")
+  --state       "$PIPELINE_STATE" \
+  --scripts-dir "$SCRIPTS_DIR") || true
 
-# For each newly merged step, add its label_done and remove label_raised
+# Add done labels for newly merged steps
+for MERGED_KEY in $NEWLY_MERGED; do
+  DONE_LABEL=$(jq -r --arg k "$MERGED_KEY" '.steps[$k].label_done // ""' "$PIPELINE_STATE")
+  RAISED_LABEL=$(jq -r --arg k "$MERGED_KEY" '.steps[$k].label_raised // ""' "$PIPELINE_STATE")
+  LABEL_ARGS=""
+  [[ -n "$DONE_LABEL" ]]   && LABEL_ARGS="$LABEL_ARGS --add-label $DONE_LABEL"
+  [[ -n "$RAISED_LABEL" ]] && LABEL_ARGS="$LABEL_ARGS --remove-label $RAISED_LABEL"
+  if [[ -n "$LABEL_ARGS" ]]; then
+    uv run --script "$SCRIPTS_DIR/update_jira_issue.py" "$JIRA_URL" \
+      $LABEL_ARGS || true
+  fi
+done
+
 if [[ -n "$NEWLY_MERGED" ]]; then
-  echo "[orchestrator] Newly merged steps: $NEWLY_MERGED"
-  for MERGED_KEY in $NEWLY_MERGED; do
-    DONE_LABEL=$(jq -r --arg k "$MERGED_KEY" '.steps[$k].label_done // ""' "$PIPELINE_STATE")
-    RAISED_LABEL=$(jq -r --arg k "$MERGED_KEY" '.steps[$k].label_raised // ""' "$PIPELINE_STATE")
-    LABEL_ARGS=""
-    [[ -n "$DONE_LABEL" ]]   && LABEL_ARGS="$LABEL_ARGS --add-label $DONE_LABEL"
-    [[ -n "$RAISED_LABEL" ]] && LABEL_ARGS="$LABEL_ARGS --remove-label $RAISED_LABEL"
-    if [[ -n "$LABEL_ARGS" ]]; then
-      uv run --script "$SCRIPTS_DIR/update_jira_issue.py" "$JIRA_URL" \
-        $LABEL_ARGS || true
-    fi
-  done
+  echo "[orchestrator] Newly merged this run: $(echo "$NEWLY_MERGED" | tr '\n' ' ')"
+else
+  echo "[orchestrator] No new merges detected."
 fi
 
-# ============================================================================
-# Step 7: Compute Unblocked Steps
-# ============================================================================
-
-echo "[orchestrator] Computing unblocked steps..."
+# ─── Step 7: Compute Unblocked Steps ────────────────────────────────────────
 UNBLOCKED_STEPS=$(jq -r '
   .steps as $steps |
   $steps | to_entries[] |
@@ -142,331 +130,213 @@ UNBLOCKED_STEPS=$(jq -r '
   ) | .key
 ' "$PIPELINE_STATE")
 
-echo "[orchestrator] Unblocked steps: ${UNBLOCKED_STEPS:-none}"
+if [[ -n "$UNBLOCKED_STEPS" ]]; then
+  echo "[orchestrator] Unblocked steps: $(echo "$UNBLOCKED_STEPS" | tr '\n' ' ')"
+else
+  echo "[orchestrator] No new steps unblocked."
+fi
 
-# ============================================================================
-# Step 8: Execute Pending Unblocked Steps
-# ============================================================================
+# ─── Step 8: Execute Pending Unblocked Steps ────────────────────────────────
 
-NEW_PRS_RAISED="false"
-
-# Helper function to check if a step is in the unblocked list
-is_unblocked() {
-  local step_key="$1"
-  echo "$UNBLOCKED_STEPS" | grep -qw "$step_key"
-}
-
-# Helper function to record PR/MR URL and update state
-record_pr_mr() {
-  local step_key="$1"
-  local url="$2"
-  local url_field="$3"  # "pr_url" or "mr_url"
-  local status="$4"     # "pr_raised" or "mr_raised"
-  local label="$5"      # label to add
-
-  TMP=$(mktemp); NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+# Helper: record PR/MR result in pipeline state and add Jira label
+record_result() {
+  local step_key="$1" url="$2" url_field="$3" status="$4"
+  local TMP NOW
+  TMP=$(mktemp)
+  NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   jq --arg k "$step_key" --arg u "$url" --arg f "$url_field" --arg s "$status" --arg ts "$NOW" \
     '.steps[$k][$f] = $u | .steps[$k].status = $s | .last_status_change_at = $ts' \
     "$PIPELINE_STATE" > "$TMP" && mv "$TMP" "$PIPELINE_STATE"
 
-  [[ -n "$label" ]] && uv run --script "$SCRIPTS_DIR/update_jira_issue.py" \
-    "$JIRA_URL" --add-label "$label" || true
+  local LABEL
+  LABEL=$(jq -r --arg k "$step_key" '.steps[$k].label_raised // ""' "$PIPELINE_STATE")
+  if [[ "$status" == "done" || "$status" == "skipped" ]]; then
+    LABEL=$(jq -r --arg k "$step_key" '.steps[$k].label_done // ""' "$PIPELINE_STATE")
+  fi
+  [[ -n "$LABEL" ]] && uv run --script "$SCRIPTS_DIR/update_jira_issue.py" \
+    "$JIRA_URL" --add-label "$LABEL" || true
 
   NEW_PRS_RAISED="true"
 }
 
-# Step 8a: create-quay-repo
+# Check if a step is in the unblocked list
+is_unblocked() {
+  echo "$UNBLOCKED_STEPS" | grep -qx "$1"
+}
+
+# Step 8a: create-quay-repo (quay)
 if is_unblocked "quay"; then
-  URL_FIELD=$(jq -r '.steps.quay.mr_url // ""' "$PIPELINE_STATE")
-  if [[ -n "$URL_FIELD" ]]; then
-    echo "[orchestrator] quay already has URL $URL_FIELD — skipping"
+  echo "[orchestrator] Running create-quay-repo..."
+  EXISTING_URL=$(jq -r '.steps.quay.mr_url // ""' "$PIPELINE_STATE")
+  EXTRA_ARGS=""
+  [[ -n "$EXISTING_URL" ]] && EXTRA_ARGS="--existing-mr-url $EXISTING_URL"
+  if MR_URL=$(bash "$SCRIPTS_DIR/create-quay-repo.sh" "$JIRA_URL" --workdir "$WORKDIR" $EXTRA_ARGS 2>&1 | tee /dev/stderr | grep -oE 'https://[^ ]+merge_requests/[0-9]+' | tail -1); then
+    record_result "quay" "$MR_URL" "mr_url" "mr_raised"
   else
-    echo "[orchestrator] Running create-quay-repo..."
-    bash "$SCRIPTS_DIR/create-quay-repo.sh" "$JIRA_URL" || {
-      echo "WARNING: create-quay-repo failed"
-    }
-
-    # Check if step is now done or has an MR
-    QUAY_STATUS=$(jq -r '.steps.quay.status // "pending"' "$PIPELINE_STATE")
-    if [[ "$QUAY_STATUS" == "done" ]]; then
-      echo "[orchestrator] Quay repo already exists — marking as done"
-    else
-      # Extract MR URL from the script's output or state
-      MR_URL=$(jq -r '.steps.quay.mr_url // ""' "$PIPELINE_STATE")
-      if [[ -n "$MR_URL" ]]; then
-        record_pr_mr "quay" "$MR_URL" "mr_url" "mr_raised" "quay-mr-raised"
-      fi
+    # Check if repo already exists (exit 0 from child)
+    if [[ $? -eq 0 ]]; then
+      record_result "quay" "" "mr_url" "done"
     fi
   fi
 fi
 
-# Step 8b: create-rhoai-delivery-repo (RHOAI only)
-if [[ "$PRODUCT_CONTEXT" == "RHOAI" ]] && is_unblocked "delivery_repo"; then
-  URL_FIELD=$(jq -r '.steps.delivery_repo.mr_url // ""' "$PIPELINE_STATE")
-  if [[ -n "$URL_FIELD" ]]; then
-    echo "[orchestrator] delivery_repo already has URL $URL_FIELD — skipping"
+# Step 8b: create-rhoai-delivery-repo (delivery_repo, RHOAI only)
+if is_unblocked "delivery_repo" && [[ "$PRODUCT_CONTEXT" == "RHOAI" ]]; then
+  echo "[orchestrator] Running create-rhoai-delivery-repo..."
+  if MR_URL=$(bash "$SCRIPTS_DIR/create-rhoai-delivery-repo.sh" "$JIRA_URL" --workdir "$WORKDIR" 2>&1 | tee /dev/stderr | grep -oE 'https://[^ ]+merge_requests/[0-9]+' | tail -1); then
+    record_result "delivery_repo" "$MR_URL" "mr_url" "mr_raised"
   else
-    echo "[orchestrator] Running create-rhoai-delivery-repo..."
-    bash "$SCRIPTS_DIR/create-rhoai-delivery-repo.sh" "$JIRA_URL" || {
-      echo "WARNING: create-rhoai-delivery-repo failed"
-    }
-
-    DELIVERY_STATUS=$(jq -r '.steps.delivery_repo.status // "pending"' "$PIPELINE_STATE")
-    if [[ "$DELIVERY_STATUS" == "done" ]]; then
-      echo "[orchestrator] Delivery repo already exists — marking as done"
-    else
-      MR_URL=$(jq -r '.steps.delivery_repo.mr_url // ""' "$PIPELINE_STATE")
-      if [[ -n "$MR_URL" ]]; then
-        record_pr_mr "delivery_repo" "$MR_URL" "mr_url" "mr_raised" "delivery-repo-mr-raised"
-      fi
+    if [[ $? -eq 0 ]]; then
+      record_result "delivery_repo" "" "mr_url" "done"
     fi
   fi
 fi
 
-# Step 8c: onboard-component-to-konflux-release-data
+# Step 8c: onboard-component-to-konflux-release-data (krd)
 if is_unblocked "krd"; then
-  URL_FIELD=$(jq -r '.steps.krd.mr_url // ""' "$PIPELINE_STATE")
-  if [[ -n "$URL_FIELD" ]]; then
-    echo "[orchestrator] krd already has URL $URL_FIELD — skipping"
+  echo "[orchestrator] Running onboard-component-to-konflux-release-data..."
+  if MR_URL=$(bash "$SCRIPTS_DIR/onboard-component-to-konflux-release-data.sh" "$JIRA_URL" --workdir "$WORKDIR" 2>&1 | tee /dev/stderr | grep -oE 'https://[^ ]+merge_requests/[0-9]+' | tail -1); then
+    record_result "krd" "$MR_URL" "mr_url" "mr_raised"
   else
-    echo "[orchestrator] Running onboard-component-to-konflux-release-data..."
-    bash "$SCRIPTS_DIR/onboard-component-to-konflux-release-data.sh" "$JIRA_URL" || {
-      echo "WARNING: onboard-component-to-konflux-release-data failed"
-    }
-
-    KRD_STATUS=$(jq -r '.steps.krd.status // "pending"' "$PIPELINE_STATE")
-    if [[ "$KRD_STATUS" == "done" ]]; then
-      echo "[orchestrator] Component already in KRD — marking as done"
-    else
-      MR_URL=$(jq -r '.steps.krd.mr_url // ""' "$PIPELINE_STATE")
-      if [[ -n "$MR_URL" ]]; then
-        record_pr_mr "krd" "$MR_URL" "mr_url" "mr_raised" "krd-mr-raised"
-      fi
+    if [[ $? -eq 0 ]]; then
+      record_result "krd" "" "mr_url" "done"
     fi
   fi
 fi
 
-# Step 8d: add-component-to-*-konflux-central
+# Step 8d: add-component-to-*-konflux-central (okc)
 if is_unblocked "okc"; then
-  URL_FIELD=$(jq -r '.steps.okc.pr_url // ""' "$PIPELINE_STATE")
-  if [[ -n "$URL_FIELD" ]]; then
-    echo "[orchestrator] okc already has URL $URL_FIELD — skipping"
-  else
-    if [[ "$PRODUCT_CONTEXT" == "ODH" ]]; then
-      echo "[orchestrator] Running add-component-to-odh-konflux-central..."
-      bash "$SCRIPTS_DIR/add-component-to-odh-konflux-central.sh" "$JIRA_URL" || {
-        echo "WARNING: add-component-to-odh-konflux-central failed"
-      }
-      LABEL="okc-pr-raised"
+  if [[ "$PRODUCT_CONTEXT" == "ODH" ]]; then
+    echo "[orchestrator] Running add-component-to-odh-konflux-central..."
+    if PR_URL=$(bash "$SCRIPTS_DIR/add-component-to-odh-konflux-central.sh" "$JIRA_URL" --workdir "$WORKDIR" 2>&1 | tee /dev/stderr | grep -oE 'https://github\.com/[^ ]+/pull/[0-9]+' | tail -1); then
+      record_result "okc" "$PR_URL" "pr_url" "pr_raised"
     else
-      echo "[orchestrator] Running add-component-to-rhoai-konflux-central..."
-      bash "$SCRIPTS_DIR/add-component-to-rhoai-konflux-central.sh" "$JIRA_URL" || {
-        echo "WARNING: add-component-to-rhoai-konflux-central failed"
-      }
-      LABEL="rkc-pr-raised"
+      if [[ $? -eq 0 ]]; then
+        record_result "okc" "" "pr_url" "done"
+      fi
     fi
-
-    OKC_STATUS=$(jq -r '.steps.okc.status // "pending"' "$PIPELINE_STATE")
-    if [[ "$OKC_STATUS" == "done" ]]; then
-      echo "[orchestrator] PipelineRun already exists — marking as done"
+  elif [[ "$PRODUCT_CONTEXT" == "RHOAI" ]]; then
+    echo "[orchestrator] Running add-component-to-rhoai-konflux-central..."
+    if PR_URL=$(bash "$SCRIPTS_DIR/add-component-to-rhoai-konflux-central.sh" "$JIRA_URL" --workdir "$WORKDIR" 2>&1 | tee /dev/stderr | grep -oE 'https://github\.com/[^ ]+/pull/[0-9]+' | tail -1); then
+      record_result "okc" "$PR_URL" "pr_url" "pr_raised"
     else
-      PR_URL=$(jq -r '.steps.okc.pr_url // ""' "$PIPELINE_STATE")
-      if [[ -n "$PR_URL" ]]; then
-        record_pr_mr "okc" "$PR_URL" "pr_url" "pr_raised" "$LABEL"
+      if [[ $? -eq 0 ]]; then
+        record_result "okc" "" "pr_url" "done"
       fi
     fi
   fi
 fi
 
-# Step 8e: create-pull-pipelines-in-rhoai-konflux-central (RHOAI only)
-if [[ "$PRODUCT_CONTEXT" == "RHOAI" ]] && is_unblocked "pull_pipelines"; then
-  URL_FIELD=$(jq -r '.steps.pull_pipelines.pr_url // ""' "$PIPELINE_STATE")
-  if [[ -n "$URL_FIELD" ]]; then
-    echo "[orchestrator] pull_pipelines already has URL $URL_FIELD — skipping"
+# Step 8e: create-pull-pipelines-in-rhoai-konflux-central (pull_pipelines, RHOAI only)
+if is_unblocked "pull_pipelines" && [[ "$PRODUCT_CONTEXT" == "RHOAI" ]]; then
+  echo "[orchestrator] Running create-pull-pipelines-in-rhoai-konflux-central..."
+  if PR_URL=$(bash "$SCRIPTS_DIR/create-pull-pipelines-in-rhoai-konflux-central.sh" "$JIRA_URL" --workdir "$WORKDIR" 2>&1 | tee /dev/stderr | grep -oE 'https://github\.com/[^ ]+/pull/[0-9]+' | tail -1); then
+    record_result "pull_pipelines" "$PR_URL" "pr_url" "pr_raised"
   else
-    echo "[orchestrator] Running create-pull-pipelines-in-rhoai-konflux-central..."
-    bash "$SCRIPTS_DIR/create-pull-pipelines-in-rhoai-konflux-central.sh" "$JIRA_URL" || {
-      echo "WARNING: create-pull-pipelines-in-rhoai-konflux-central failed"
-    }
-
-    PULL_STATUS=$(jq -r '.steps.pull_pipelines.status // "pending"' "$PIPELINE_STATE")
-    if [[ "$PULL_STATUS" == "done" ]]; then
-      echo "[orchestrator] Pull pipelines already exist — marking as done"
-    else
-      PR_URL=$(jq -r '.steps.pull_pipelines.pr_url // ""' "$PIPELINE_STATE")
-      if [[ -n "$PR_URL" ]]; then
-        record_pr_mr "pull_pipelines" "$PR_URL" "pr_url" "pr_raised" "rkc-pull-pr-raised"
-      fi
+    if [[ $? -eq 0 ]]; then
+      record_result "pull_pipelines" "" "pr_url" "done"
     fi
   fi
 fi
 
-# Step 8f: integrate-component-with-odh-operator
+# Step 8f: integrate-component-with-odh-operator (operator)
 if is_unblocked "operator"; then
   if [[ "$IS_OPERATOR" == "false" ]]; then
-    echo "[orchestrator] IS_OPERATOR=false — marking operator step as skipped"
-    bash "$SCRIPTS_DIR/pipeline_state.sh" set \
-      --state "$PIPELINE_STATE" --step operator --field status --value "skipped"
+    echo "[orchestrator] is_operator=false — skipping operator step."
+    TMP=$(mktemp); NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    jq --arg ts "$NOW" \
+      '.steps.operator.status = "skipped" | .last_status_change_at = $ts' \
+      "$PIPELINE_STATE" > "$TMP" && mv "$TMP" "$PIPELINE_STATE"
   else
-    URL_FIELD=$(jq -r '.steps.operator.pr_url // ""' "$PIPELINE_STATE")
-    if [[ -n "$URL_FIELD" ]]; then
-      echo "[orchestrator] operator already has URL $URL_FIELD — skipping"
-    else
-      echo "[orchestrator] Running integrate-component-with-odh-operator..."
-      bash "$SCRIPTS_DIR/integrate-component-with-odh-operator.sh" "$JIRA_URL" || {
-        echo "WARNING: integrate-component-with-odh-operator failed"
-      }
-
-      PR_URL=$(jq -r '.steps.operator.pr_url // ""' "$PIPELINE_STATE")
-      if [[ -n "$PR_URL" ]]; then
-        record_pr_mr "operator" "$PR_URL" "pr_url" "pr_raised" "operator-pr-raised"
-      fi
+    echo "[orchestrator] Running integrate-component-with-odh-operator..."
+    EXISTING_URL=$(jq -r '.steps.operator.pr_url // ""' "$PIPELINE_STATE")
+    EXTRA_ARGS=""
+    [[ -n "$EXISTING_URL" ]] && EXTRA_ARGS="--existing-pr-url $EXISTING_URL"
+    if PR_URL=$(bash "$SCRIPTS_DIR/integrate-component-with-odh-operator.sh" "$JIRA_URL" --workdir "$WORKDIR" $EXTRA_ARGS 2>&1 | tee /dev/stderr | grep -oE 'https://github\.com/[^ ]+/pull/[0-9]+' | tail -1); then
+      record_result "operator" "$PR_URL" "pr_url" "pr_raised"
     fi
   fi
 fi
 
-# Step 8g: integrate-component-with-bundle
+# Step 8g: integrate-component-with-bundle (bundle)
 if is_unblocked "bundle"; then
-  URL_FIELD=$(jq -r '.steps.bundle.pr_url // ""' "$PIPELINE_STATE")
-  if [[ -n "$URL_FIELD" ]]; then
-    echo "[orchestrator] bundle already has URL $URL_FIELD — skipping"
-  else
-    echo "[orchestrator] Running integrate-component-with-bundle..."
-    bash "$SCRIPTS_DIR/integrate-component-with-bundle.sh" "$JIRA_URL" || {
-      echo "WARNING: integrate-component-with-bundle failed"
-    }
+  echo "[orchestrator] Running integrate-component-with-bundle..."
+  if PR_URL=$(bash "$SCRIPTS_DIR/integrate-component-with-bundle.sh" "$JIRA_URL" --workdir "$WORKDIR" 2>&1 | tee /dev/stderr | grep -oE 'https://github\.com/[^ ]+/pull/[0-9]+' | tail -1); then
+    record_result "bundle" "$PR_URL" "pr_url" "pr_raised"
+  fi
+fi
 
-    PR_URL=$(jq -r '.steps.bundle.pr_url // ""' "$PIPELINE_STATE")
-    if [[ -n "$PR_URL" ]]; then
-      record_pr_mr "bundle" "$PR_URL" "pr_url" "pr_raised" "bundle-pr-raised"
+# Step 8h: update-rhoai-product-listing (product_listing, RHOAI only)
+if is_unblocked "product_listing" && [[ "$PRODUCT_CONTEXT" == "RHOAI" ]]; then
+  echo "[orchestrator] Running update-rhoai-product-listing..."
+  if MR_URL=$(bash "$SCRIPTS_DIR/update-rhoai-product-listing.sh" "$JIRA_URL" --workdir "$WORKDIR" 2>&1 | tee /dev/stderr | grep -oE 'https://[^ ]+merge_requests/[0-9]+' | tail -1); then
+    record_result "product_listing" "$MR_URL" "mr_url" "mr_raised"
+  else
+    if [[ $? -eq 0 ]]; then
+      record_result "product_listing" "" "mr_url" "done"
     fi
   fi
 fi
 
-# Step 8h: update-rhoai-product-listing (RHOAI only)
-if [[ "$PRODUCT_CONTEXT" == "RHOAI" ]] && is_unblocked "product_listing"; then
-  URL_FIELD=$(jq -r '.steps.product_listing.mr_url // ""' "$PIPELINE_STATE")
-  if [[ -n "$URL_FIELD" ]]; then
-    echo "[orchestrator] product_listing already has URL $URL_FIELD — skipping"
+# Step 8i: setup-auto-merge (auto_merge, RHOAI only)
+if is_unblocked "auto_merge" && [[ "$PRODUCT_CONTEXT" == "RHOAI" ]]; then
+  echo "[orchestrator] Running setup-auto-merge..."
+  if PR_URL=$(bash "$SCRIPTS_DIR/setup-auto-merge.sh" "$JIRA_URL" --workdir "$WORKDIR" 2>&1 | tee /dev/stderr | grep -oE 'https://github\.com/[^ ]+/pull/[0-9]+' | tail -1); then
+    record_result "auto_merge" "$PR_URL" "pr_url" "pr_raised"
   else
-    echo "[orchestrator] Running update-rhoai-product-listing..."
-    bash "$SCRIPTS_DIR/update-rhoai-product-listing.sh" "$JIRA_URL" || {
-      echo "WARNING: update-rhoai-product-listing failed"
-    }
-
-    LISTING_STATUS=$(jq -r '.steps.product_listing.status // "pending"' "$PIPELINE_STATE")
-    if [[ "$LISTING_STATUS" == "done" ]]; then
-      echo "[orchestrator] Product listing already exists — marking as done"
-    else
-      MR_URL=$(jq -r '.steps.product_listing.mr_url // ""' "$PIPELINE_STATE")
-      if [[ -n "$MR_URL" ]]; then
-        record_pr_mr "product_listing" "$MR_URL" "mr_url" "mr_raised" "product-listing-mr-raised"
-      fi
+    if [[ $? -eq 0 ]]; then
+      record_result "auto_merge" "" "pr_url" "done"
     fi
   fi
 fi
 
-# Step 8i: setup-auto-merge (RHOAI only)
-if [[ "$PRODUCT_CONTEXT" == "RHOAI" ]] && is_unblocked "auto_merge"; then
-  URL_FIELD=$(jq -r '.steps.auto_merge.pr_url // ""' "$PIPELINE_STATE")
-  if [[ -n "$URL_FIELD" ]]; then
-    echo "[orchestrator] auto_merge already has URL $URL_FIELD — skipping"
+# Step 8j: enable-renovate-on-rhoai-component-repo (renovate, RHOAI only)
+if is_unblocked "renovate" && [[ "$PRODUCT_CONTEXT" == "RHOAI" ]]; then
+  echo "[orchestrator] Running enable-renovate-on-rhoai-component-repo..."
+  if PR_URL=$(bash "$SCRIPTS_DIR/enable-renovate-on-rhoai-component-repo.sh" "$JIRA_URL" --workdir "$WORKDIR" 2>&1 | tee /dev/stderr | grep -oE 'https://github\.com/[^ ]+/pull/[0-9]+' | tail -1); then
+    record_result "renovate" "$PR_URL" "pr_url" "pr_raised"
   else
-    echo "[orchestrator] Running setup-auto-merge..."
-    bash "$SCRIPTS_DIR/setup-auto-merge.sh" "$JIRA_URL" || {
-      echo "WARNING: setup-auto-merge failed"
-    }
-
-    AUTO_STATUS=$(jq -r '.steps.auto_merge.status // "pending"' "$PIPELINE_STATE")
-    if [[ "$AUTO_STATUS" == "done" ]]; then
-      echo "[orchestrator] Auto-merge entries already exist — marking as done"
-    else
-      PR_URL=$(jq -r '.steps.auto_merge.pr_url // ""' "$PIPELINE_STATE")
-      if [[ -n "$PR_URL" ]]; then
-        record_pr_mr "auto_merge" "$PR_URL" "pr_url" "pr_raised" "auto-merge-pr-raised"
-      fi
+    if [[ $? -eq 0 ]]; then
+      record_result "renovate" "" "pr_url" "done"
     fi
   fi
 fi
 
-# Step 8j: enable-renovate-on-rhoai-component-repo (RHOAI only)
-if [[ "$PRODUCT_CONTEXT" == "RHOAI" ]] && is_unblocked "renovate"; then
-  URL_FIELD=$(jq -r '.steps.renovate.pr_url // ""' "$PIPELINE_STATE")
-  if [[ -n "$URL_FIELD" ]]; then
-    echo "[orchestrator] renovate already has URL $URL_FIELD — skipping"
-  else
-    echo "[orchestrator] Running enable-renovate-on-rhoai-component-repo..."
-    bash "$SCRIPTS_DIR/enable-renovate-on-rhoai-component-repo.sh" "$JIRA_URL" || {
-      echo "WARNING: enable-renovate-on-rhoai-component-repo failed"
-    }
+# ─── Step 9: Handle Workflow Triggers ────────────────────────────────────────
 
-    RENOVATE_STATUS=$(jq -r '.steps.renovate.status // "pending"' "$PIPELINE_STATE")
-    if [[ "$RENOVATE_STATUS" == "done" ]]; then
-      echo "[orchestrator] Renovate entry already exists — marking as done"
-    else
-      PR_URL=$(jq -r '.steps.renovate.pr_url // ""' "$PIPELINE_STATE")
-      if [[ -n "$PR_URL" ]]; then
-        record_pr_mr "renovate" "$PR_URL" "pr_url" "pr_raised" "renovate-pr-raised"
-      fi
-    fi
+# Step 9a: run-odh-konflux-onboarder-workflow (onboarder_workflow, ODH only)
+if is_unblocked "onboarder_workflow" && [[ "$PRODUCT_CONTEXT" == "ODH" ]]; then
+  echo "[orchestrator] Running run-odh-konflux-onboarder-workflow..."
+  if TEKTON_PR_URL=$(bash "$SCRIPTS_DIR/run-odh-konflux-onboarder-workflow.sh" "$JIRA_URL" --workdir "$WORKDIR" 2>&1 | tee /dev/stderr | grep -oE 'https://github\.com/[^ ]+/pull/[0-9]+' | tail -1); then
+    TMP=$(mktemp); NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    jq --arg u "$TEKTON_PR_URL" --arg s "pr_raised" --arg ts "$NOW" \
+      '.steps.onboarder_workflow.pr_url = $u | .steps.onboarder_workflow.status = $s | .last_status_change_at = $ts' \
+      "$PIPELINE_STATE" > "$TMP" && mv "$TMP" "$PIPELINE_STATE"
+    NEW_PRS_RAISED="true"
+    uv run --script "$SCRIPTS_DIR/update_jira_issue.py" "$JIRA_URL" \
+      --add-label "tekton-pr-raised" || true
   fi
 fi
 
-# ============================================================================
-# Step 9: Handle Workflow Triggers
-# ============================================================================
-
-# Step 9a: run-odh-konflux-onboarder-workflow (ODH only)
-if [[ "$PRODUCT_CONTEXT" == "ODH" ]] && is_unblocked "onboarder_workflow"; then
-  URL_FIELD=$(jq -r '.steps.onboarder_workflow.pr_url // ""' "$PIPELINE_STATE")
-  if [[ -n "$URL_FIELD" ]]; then
-    echo "[orchestrator] onboarder_workflow already has URL $URL_FIELD — skipping"
-  else
-    echo "[orchestrator] Running run-odh-konflux-onboarder-workflow..."
-    bash "$SCRIPTS_DIR/run-odh-konflux-onboarder-workflow.sh" "$JIRA_URL" || {
-      echo "WARNING: run-odh-konflux-onboarder-workflow failed"
-    }
-
-    TEKTON_PR_URL=$(jq -r '.steps.onboarder_workflow.pr_url // ""' "$PIPELINE_STATE")
-    if [[ -n "$TEKTON_PR_URL" ]]; then
-      TMP=$(mktemp); NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-      jq --arg u "$TEKTON_PR_URL" --arg s "pr_raised" --arg ts "$NOW" \
-        '.steps.onboarder_workflow.pr_url = $u | .steps.onboarder_workflow.status = $s | .last_status_change_at = $ts' \
-        "$PIPELINE_STATE" > "$TMP" && mv "$TMP" "$PIPELINE_STATE"
-      NEW_PRS_RAISED="true"
-      uv run --script "$SCRIPTS_DIR/update_jira_issue.py" "$JIRA_URL" \
-        --add-label "tekton-pr-raised" || true
-    fi
+# Step 9b: sync-rhoai-renovate-configs (renovate_sync, RHOAI only)
+if is_unblocked "renovate_sync" && [[ "$PRODUCT_CONTEXT" == "RHOAI" ]]; then
+  echo "[orchestrator] Running sync-rhoai-renovate-configs..."
+  RKC_URL="${RHOAI_KONFLUX_CENTRAL_REPO_URL:-https://github.com/red-hat-data-services/konflux-central.git}"
+  if bash "$SCRIPTS_DIR/sync-rhoai-renovate-configs.sh" "$JIRA_URL" --workdir "$WORKDIR"; then
+    # The sync skill sets RUN_ID and RKC_PATH — build the URL
+    RKC_PATH=$(echo "$RKC_URL" | sed 's|https://github.com/||; s|\.git$||')
+    RUN_URL="https://github.com/${RKC_PATH}/actions"
+    TMP=$(mktemp); NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    jq --arg ts "$NOW" --arg url "$RUN_URL" \
+      '.steps.renovate_sync.status = "done" | .steps.renovate_sync.run_url = $url | .last_status_change_at = $ts' \
+      "$PIPELINE_STATE" > "$TMP" && mv "$TMP" "$PIPELINE_STATE"
+    uv run --script "$SCRIPTS_DIR/update_jira_issue.py" "$JIRA_URL" \
+      --add-label "renovate-sync-triggered" || true
+    NEW_PRS_RAISED="true"
   fi
 fi
 
-# Step 9b: sync-rhoai-renovate-configs (RHOAI only)
-if [[ "$PRODUCT_CONTEXT" == "RHOAI" ]] && is_unblocked "renovate_sync"; then
-  SYNC_STATUS=$(jq -r '.steps.renovate_sync.status // "pending"' "$PIPELINE_STATE")
-  if [[ "$SYNC_STATUS" == "done" ]]; then
-    echo "[orchestrator] renovate_sync already done — skipping"
-  else
-    echo "[orchestrator] Running sync-rhoai-renovate-configs..."
-    bash "$SCRIPTS_DIR/sync-rhoai-renovate-configs.sh" "$JIRA_URL" || {
-      echo "WARNING: sync-rhoai-renovate-configs failed"
-    }
-
-    RUN_URL=$(jq -r '.steps.renovate_sync.run_url // ""' "$PIPELINE_STATE")
-    if [[ -n "$RUN_URL" ]]; then
-      TMP=$(mktemp); NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-      jq --arg ts "$NOW" --arg url "$RUN_URL" \
-        '.steps.renovate_sync.status = "done" | .steps.renovate_sync.run_url = $url | .last_status_change_at = $ts' \
-        "$PIPELINE_STATE" > "$TMP" && mv "$TMP" "$PIPELINE_STATE"
-      uv run --script "$SCRIPTS_DIR/update_jira_issue.py" "$JIRA_URL" \
-        --add-label "renovate-sync-triggered" || true
-    fi
-  fi
-fi
-
-# ============================================================================
-# Step 10: Check Idle Reminder
-# ============================================================================
-
+# ─── Step 10: Check Idle Reminder ───────────────────────────────────────────
 LAST_CHANGE=$(jq -r '.last_status_change_at // ""' "$PIPELINE_STATE")
 IDLE_DAYS=0
 if [[ -n "$LAST_CHANGE" ]]; then
@@ -485,10 +355,7 @@ if [[ "$HAS_OPEN" -gt 0 && "$IDLE_DAYS" -ge 2 && -n "$ASSIGNEE" ]]; then
   POST_IDLE_REMINDER="true"
 fi
 
-# ============================================================================
-# Step 11: Post Pending PRs/MRs Summary to Jira
-# ============================================================================
-
+# ─── Step 11: Post Pending PRs/MRs Summary to Jira ──────────────────────────
 SOMETHING_CHANGED="false"
 [[ -n "$NEWLY_MERGED" ]] && SOMETHING_CHANGED="true"
 [[ "${NEW_PRS_RAISED:-false}" == "true" ]] && SOMETHING_CHANGED="true"
@@ -499,7 +366,7 @@ if [[ "$SOMETHING_CHANGED" == "true" ]]; then
     --component-name  "$COMPONENT_NAME" \
     --product-context "$PRODUCT_CONTEXT" \
     --mode            "pending-only" \
-    ${ASSIGNEE:+--assignee "$ASSIGNEE"})
+    ${ASSIGNEE:+--assignee "$ASSIGNEE"}) || true
 
   if [[ -n "$PENDING_COMMENT" ]]; then
     uv run --script "$SCRIPTS_DIR/update_jira_issue.py" "$JIRA_URL" \
@@ -507,46 +374,40 @@ if [[ "$SOMETHING_CHANGED" == "true" ]]; then
   fi
 fi
 
-# ============================================================================
-# Step 12: Resolve or Keep in Review
-# ============================================================================
-
+# ─── Step 12: Resolve or Keep in Review ──────────────────────────────────────
 ALL_DONE=$(jq -r '
   [.steps | to_entries[] | select(.value.status != "skipped")] |
   all(.value.status == "done" or .value.status == "merged")
 ' "$PIPELINE_STATE")
 
 if [[ "$ALL_DONE" == "true" ]]; then
-  echo "[orchestrator] All steps complete — resolving Jira"
-
+  # All steps complete — resolve the Jira ticket
   FULL_COMMENT=$(uv run --script "$SCRIPTS_DIR/build_progress_summary.py" \
     --state           "$PIPELINE_STATE" \
     --component-name  "$COMPONENT_NAME" \
     --product-context "$PRODUCT_CONTEXT" \
-    --mode            "full")
+    --mode            "full") || true
 
   uv run --script "$SCRIPTS_DIR/update_jira_issue.py" "$JIRA_URL" \
     --comment   "$FULL_COMMENT" \
     --add-label "component-onboarding-completed" \
-    --status    "Resolved"
+    --status    "Resolved" || true
 
   echo "[orchestrator] All steps complete — Jira resolved with component-onboarding-completed label."
-elif [[ "$HAS_OPEN" -gt 0 ]]; then
-  echo "[orchestrator] PRs/MRs pending — transitioning to Review"
-
-  bash "$SCRIPTS_DIR/raise_jira_review.sh" \
-    --workdir         "$WORKDIR" \
-    --jira-url        "$JIRA_URL" \
-    --scripts-dir     "$SCRIPTS_DIR" \
-    --component-name  "$COMPONENT_NAME" \
-    --product-context "$PRODUCT_CONTEXT" \
-    ${ASSIGNEE:+--assignee "$ASSIGNEE"}
+else
+  # Some steps still pending — transition to Review if PRs/MRs are open
+  if [[ "$HAS_OPEN" -gt 0 ]]; then
+    bash "$SCRIPTS_DIR/raise_jira_review.sh" \
+      --workdir         "$WORKDIR" \
+      --jira-url        "$JIRA_URL" \
+      --scripts-dir     "$SCRIPTS_DIR" \
+      --component-name  "$COMPONENT_NAME" \
+      --product-context "$PRODUCT_CONTEXT" \
+      ${ASSIGNEE:+--assignee "$ASSIGNEE"} || true
+  fi
 fi
 
-# ============================================================================
-# Print Final Summary
-# ============================================================================
-
+# ─── Print Final Summary ────────────────────────────────────────────────────
 echo ""
 echo "=== onboard-konflux-components-for-odh-and-rhoai — Run Complete ==="
 echo ""
@@ -556,66 +417,40 @@ echo "  Jira           : $JIRA_URL"
 echo ""
 echo "PRs / MRs:"
 
-QUAY_STATUS=$(jq -r '.steps.quay.status // "pending"' "$PIPELINE_STATE")
-QUAY_URL=$(jq -r '.steps.quay.mr_url // "not yet raised"' "$PIPELINE_STATE")
-echo "  quay            : $QUAY_STATUS — $QUAY_URL"
+print_step_status() {
+  local key="$1" label="$2"
+  local status url
+  status=$(jq -r --arg k "$key" '.steps[$k].status // "N/A"' "$PIPELINE_STATE")
+  url=$(jq -r --arg k "$key" '.steps[$k].pr_url // .steps[$k].mr_url // "not yet raised"' "$PIPELINE_STATE")
+  [[ "$url" == "null" || -z "$url" ]] && url="not yet raised"
+  printf "  %-20s: %s — %s\n" "$label" "$status" "$url"
+}
 
-KRD_STATUS=$(jq -r '.steps.krd.status // "pending"' "$PIPELINE_STATE")
-KRD_URL=$(jq -r '.steps.krd.mr_url // "not yet raised"' "$PIPELINE_STATE")
-echo "  krd             : $KRD_STATUS — $KRD_URL"
-
-OKC_STATUS=$(jq -r '.steps.okc.status // "pending"' "$PIPELINE_STATE")
-OKC_URL=$(jq -r '.steps.okc.pr_url // "not yet raised"' "$PIPELINE_STATE")
-echo "  okc             : $OKC_STATUS — $OKC_URL"
-
-if [[ "$PRODUCT_CONTEXT" == "RHOAI" ]]; then
-  PULL_STATUS=$(jq -r '.steps.pull_pipelines.status // "pending"' "$PIPELINE_STATE")
-  PULL_URL=$(jq -r '.steps.pull_pipelines.pr_url // "not yet raised"' "$PIPELINE_STATE")
-  echo "  pull_pipelines  : $PULL_STATUS — $PULL_URL"
-else
-  echo "  pull_pipelines  : N/A (ODH)"
-fi
-
-OPERATOR_STATUS=$(jq -r '.steps.operator.status // "pending"' "$PIPELINE_STATE")
-OPERATOR_URL=$(jq -r '.steps.operator.pr_url // "not yet raised"' "$PIPELINE_STATE")
-echo "  operator        : $OPERATOR_STATUS — $OPERATOR_URL"
-
-BUNDLE_STATUS=$(jq -r '.steps.bundle.status // "pending"' "$PIPELINE_STATE")
-BUNDLE_URL=$(jq -r '.steps.bundle.pr_url // "not yet raised"' "$PIPELINE_STATE")
-echo "  bundle          : $BUNDLE_STATUS — $BUNDLE_URL"
+print_step_status "quay"               "quay"
+print_step_status "krd"                "krd"
+print_step_status "okc"                "okc"
 
 if [[ "$PRODUCT_CONTEXT" == "RHOAI" ]]; then
-  DELIVERY_STATUS=$(jq -r '.steps.delivery_repo.status // "pending"' "$PIPELINE_STATE")
-  DELIVERY_URL=$(jq -r '.steps.delivery_repo.mr_url // "not yet raised"' "$PIPELINE_STATE")
-  echo "  delivery_repo   : $DELIVERY_STATUS — $DELIVERY_URL"
-
-  LISTING_STATUS=$(jq -r '.steps.product_listing.status // "pending"' "$PIPELINE_STATE")
-  LISTING_URL=$(jq -r '.steps.product_listing.mr_url // "not yet raised"' "$PIPELINE_STATE")
-  echo "  product_listing : $LISTING_STATUS — $LISTING_URL"
-
-  AUTO_STATUS=$(jq -r '.steps.auto_merge.status // "pending"' "$PIPELINE_STATE")
-  AUTO_URL=$(jq -r '.steps.auto_merge.pr_url // "not yet raised"' "$PIPELINE_STATE")
-  echo "  auto_merge      : $AUTO_STATUS — $AUTO_URL"
-
-  RENOVATE_STATUS=$(jq -r '.steps.renovate.status // "pending"' "$PIPELINE_STATE")
-  RENOVATE_URL=$(jq -r '.steps.renovate.pr_url // "not yet raised"' "$PIPELINE_STATE")
-  echo "  renovate        : $RENOVATE_STATUS — $RENOVATE_URL"
-
-  SYNC_STATUS=$(jq -r '.steps.renovate_sync.status // "pending"' "$PIPELINE_STATE")
-  SYNC_URL=$(jq -r '.steps.renovate_sync.run_url // "not yet triggered"' "$PIPELINE_STATE")
-  echo "  renovate_sync   : $SYNC_STATUS — $SYNC_URL"
+  print_step_status "pull_pipelines"   "pull_pipelines"
+  print_step_status "delivery_repo"    "delivery_repo"
+  print_step_status "product_listing"  "product_listing"
+  print_step_status "auto_merge"       "auto_merge"
+  print_step_status "renovate"         "renovate"
+  print_step_status "renovate_sync"    "renovate_sync"
 else
-  echo "  delivery_repo   : N/A (ODH)"
-  echo "  product_listing : N/A (ODH)"
-  echo "  auto_merge      : N/A (ODH)"
-  echo "  renovate        : N/A (ODH)"
-  echo "  renovate_sync   : N/A (ODH)"
+  echo "  pull_pipelines    : N/A (ODH)"
+  echo "  delivery_repo     : N/A (ODH)"
+  echo "  product_listing   : N/A (ODH)"
+  echo "  auto_merge        : N/A (ODH)"
+  echo "  renovate          : N/A (ODH)"
+  echo "  renovate_sync     : N/A (ODH)"
 fi
+
+print_step_status "operator"           "operator"
+print_step_status "bundle"             "bundle"
 
 if [[ "$PRODUCT_CONTEXT" == "ODH" ]]; then
-  ONBOARDER_STATUS=$(jq -r '.steps.onboarder_workflow.status // "pending"' "$PIPELINE_STATE")
-  ONBOARDER_URL=$(jq -r '.steps.onboarder_workflow.pr_url // "not yet raised"' "$PIPELINE_STATE")
-  echo "  onboarder_workflow: $ONBOARDER_STATUS — $ONBOARDER_URL"
+  print_step_status "onboarder_workflow" "onboarder_workflow"
 else
   echo "  onboarder_workflow: N/A (RHOAI)"
 fi
@@ -624,4 +459,4 @@ echo ""
 echo "Newly merged this run : ${NEWLY_MERGED:-none}"
 echo "State file            : $PIPELINE_STATE"
 echo ""
-echo "Re-run this skill after PRs/MRs are merged to advance the pipeline."
+echo "Re-run this script after PRs/MRs are merged to advance the pipeline."
