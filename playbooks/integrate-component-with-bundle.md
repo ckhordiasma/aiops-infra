@@ -1,6 +1,6 @@
 # Integrate Component with Bundle
 
-Adds component image references to the ODH or RHOAI build config bundle Dockerfile.
+Adds a component's relatedImages entry to the build config bundle and (for RHOAI) updates the repo mappings and Dockerfile git labels.
 
 **Applies to:** ODH / RHOAI / Both
 **Pipeline step:** 4
@@ -20,13 +20,14 @@ After a component is onboarded to Konflux and you need to integrate it with the 
 
 **For ODH components:**
 Repository: `https://github.com/opendatahub-io/ODH-Build-Config`
-File: `bundle/Dockerfile`
+File: `bundle/bundle-patch.yaml` — add a `relatedImages` entry
 
 **For RHOAI components:**
 Repository: `https://github.com/red-hat-data-services/RHOAI-Build-Config`
-File: `bundle/Dockerfile`
-
-You'll be adding LABEL entries to the bundle Dockerfile that reference the component's container image and metadata.
+Files:
+- `bundle/bundle-patch.yaml` — add a `relatedImages` entry
+- `config/build-config.yaml` — add a `repo_mappings` entry
+- `bundle/Dockerfile` — add ARG and LABEL entries for git source tracking
 
 ## Steps
 
@@ -65,38 +66,59 @@ The bundle image reference typically follows the pattern:
 
 Check the component's Konflux configuration to verify the exact image reference.
 
-### 5. Add bundle Dockerfile entries
+### 5. Add relatedImages entry to bundle-patch.yaml
 
-Edit `bundle/Dockerfile` to add LABEL entries for the component. Follow the existing pattern in the file.
+Edit `bundle/bundle-patch.yaml` to add a `relatedImages` entry for the component. Follow the existing pattern in the file — each entry has a `name` and `image` field under `patch.relatedImages`.
 
-Example entries:
+Example entry:
 
-```dockerfile
-LABEL com.redhat.component.my-component.image="quay.io/rhoai/my-component:v2.15"
-LABEL com.redhat.component.my-component.source.git.url="https://github.com/org/my-component"
-LABEL com.redhat.component.my-component.source.git.ref="rhoai-2.15"
+```yaml
+patch:
+  relatedImages:
+    # ... existing entries ...
+    - name: RELATED_IMAGE_my-component
+      image: quay.io/rhoai/my-component-rhel9@sha256:<digest>
 ```
 
-### 6. Commit and push
+### 6. (RHOAI only) Update build-config.yaml and Dockerfile
 
-Stage the modified Dockerfile, commit, and push to your fork.
+For RHOAI components, also update:
 
-    git add bundle/Dockerfile
-    git commit -m "Add my-component to bundle manifest"
+1. `config/build-config.yaml` — add a `repo_mappings` entry under `config.replacements.0.repo_mappings`:
+
+       rhoai/my-component-rhel9: rhoai/my-component-rhel9
+
+2. `bundle/Dockerfile` — add ARG and LABEL entries for git source tracking. Use `update_bundle_dockerfile_git_labels.py` or follow the existing pattern.
+
+### 7. Commit and push
+
+Stage all modified files, commit, and push to your fork.
+
+    # ODH:
+    git add bundle/bundle-patch.yaml
+    # RHOAI:
+    git add bundle/bundle-patch.yaml config/build-config.yaml bundle/Dockerfile
+
+    git commit -m "Add my-component to bundle-patch.yaml"
     git push origin RHOAIENG-1234
 
-### 7. Create pull request
+### 8. Create pull request
 
-Raise a PR targeting the upstream repository's main branch.
+Raise a PR targeting the upstream repository's main or version-specific branch.
 
-    gh pr create --title "Add my-component to bundle manifest" \
-      --body "Adds bundle Dockerfile entries for my-component.\n\n**Component name:** my-component\n**Image:** quay.io/rhoai/my-component:v2.15\n**Jira:** <jira-url>" \
+    gh pr create --title "Add my-component to bundle-patch.yaml" \
+      --body "Adds my-component to the bundle relatedImages.
+
+    **Component name:** my-component
+    **Jira:** <jira-url>
+
+    - \`bundle/bundle-patch.yaml\` — added RELATED_IMAGE_my-component" \
       --base main \
       --head $(git config user.name):RHOAIENG-1234
 
-### 8. Update Jira
+### 9. Update Jira
 
-Add label `bundle-integration-pr-raised` and comment with PR URL and bundle image details.
+Add label `bundle-pr-raised` and comment with PR URL and bundle image details.
 
 ## Troubleshooting
 
@@ -104,9 +126,10 @@ Add label `bundle-integration-pr-raised` and comment with PR URL and bundle imag
 |---------|----------|
 | Fork fails | Check GITHUB_TOKEN has repo scope |
 | component_onboarding_details.yaml not found | Run /create-component-onboarding-jira first |
-| Dockerfile format unclear | Review existing LABEL entries in bundle/Dockerfile |
+| bundle-patch.yaml format unclear | Review existing `relatedImages` entries in `bundle/bundle-patch.yaml` |
 | Image reference unknown | Check the component's Konflux configuration or Quay repository |
 | PR creation fails | Check GITHUB_TOKEN permissions and that branch was pushed |
+| build-config.yaml not found (RHOAI) | Ensure you used `--sparse-files "bundle config"` when cloning |
 
 ## Automation
 

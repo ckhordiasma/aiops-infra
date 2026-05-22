@@ -1,6 +1,6 @@
 # Integrate Component with ODH Operator
 
-Adds operator component manifests to the ODH or RHOAI operator repository by updating the Makefile.
+Adds operator component entries to the ODH or RHOAI operator repository by updating `build/manifests-config.yaml`.
 
 **Applies to:** ODH / RHOAI / Both
 **Pipeline step:** 3 (for operator components only)
@@ -20,13 +20,13 @@ After an operator component is onboarded to Konflux and you need to integrate it
 
 **For ODH components:**
 Repository: `https://github.com/opendatahub-io/opendatahub-operator`
-File: `Makefile`
+File: `build/manifests-config.yaml`
 
 **For RHOAI components:**
 Repository: `https://github.com/red-hat-data-services/rhods-operator`
-File: `Makefile`
+File: `build/manifests-config.yaml`
 
-You'll be adding manifest copy entries to the Makefile that copy operator manifests from the component's upstream repository into the operator's manifest directory.
+You'll be adding a component entry under the `map:` key in `build/manifests-config.yaml` that configures how the operator copies manifests from the component's upstream repository.
 
 ## Steps
 
@@ -58,39 +58,41 @@ Extract the required fields from component_onboarding_details.yaml:
 - `repo_branch`: The branch to copy manifests from
 - `manifests_path`: The path within the repo where manifests are located
 
-### 4. Add Makefile entries
+### 4. Add component entry to manifests-config.yaml
 
-Edit the Makefile to add manifest copy commands. Find the section where manifests are copied and add entries following the existing pattern.
+Edit `build/manifests-config.yaml` to add the component under the `map:` key. Follow the existing pattern — each entry maps a component name to its upstream repo and manifest source path.
 
-Example entry:
+Check if the component already exists first:
 
-```makefile
-# Copy my-component manifests
-cp -r ../my-component/manifests/* manifests/my-component/
-```
+    grep "^  my-component:" build/manifests-config.yaml
 
-The exact format depends on the operator repository's structure. Review existing entries as a guide.
+If not present, add an entry following the existing pattern in the file.
 
 ### 5. Commit and push
 
-Stage the modified Makefile, commit, and push to your fork.
+Stage the modified config, commit, and push to your fork.
 
-    git add Makefile
-    git commit -m "Add my-component manifest copy entries"
+    git add build/manifests-config.yaml
+    git commit -m "Add my-component to manifests-config.yaml"
     git push origin RHOAIENG-1234
 
 ### 6. Create pull request
 
 Raise a PR targeting the upstream repository's main branch.
 
-    gh pr create --title "Add my-component to operator manifests" \
-      --body "Adds manifest copy entries for my-component.\n\n**Component name:** my-component\n**Manifests path:** manifests/my-component\n**Jira:** <jira-url>" \
+    gh pr create --title "Add my-component to manifests-config.yaml" \
+      --body "Adds my-component to the operator manifests config.
+
+    **Component name:** my-component
+    **Jira:** <jira-url>
+
+    - \`build/manifests-config.yaml\` — added my-component entry under map:" \
       --base main \
       --head $(git config user.name):RHOAIENG-1234
 
 ### 7. Update Jira
 
-Add label `operator-integration-pr-raised` and comment with PR URL and component details.
+Add label `operator-pr-raised` (RHOAI) or `odh-operator-pr-raised` (ODH) and comment with PR URL and component details. If the component has `is_operator=false`, add label `operator-changes-not-needed` instead and skip the PR.
 
 ## Troubleshooting
 
@@ -99,7 +101,7 @@ Add label `operator-integration-pr-raised` and comment with PR URL and component
 | Fork fails | Check GITHUB_TOKEN has repo scope |
 | component_onboarding_details.yaml not found | Run /create-component-onboarding-jira first |
 | is_operator field is false | This step only applies to operator components |
-| Makefile format unclear | Review existing entries in the Makefile for patterns |
+| manifests-config.yaml format unclear | Review existing entries under `map:` in `build/manifests-config.yaml` |
 | PR creation fails | Check GITHUB_TOKEN permissions and that branch was pushed |
 
 ## Automation
@@ -112,7 +114,7 @@ Beyond the manual steps above, the script also:
 - Automatically downloads component_onboarding_details.yaml from Jira
 - Validates that `is_operator: true` before proceeding
 - Determines the correct operator repository based on product_context
-- Generates appropriate Makefile entries following repository conventions
+- Uses `edit_yaml.py insert-map-key` for structured YAML editing of manifests-config.yaml
 - Handles idempotency (skips if entries already exist)
 - Updates Jira with labels and structured comments
 

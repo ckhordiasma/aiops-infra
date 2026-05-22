@@ -30,7 +30,7 @@ After the component has been onboarded to konflux-release-data (Step 4). This st
 **Repository:** `red-hat-data-services/konflux-central` (or override via `RHOAI_KONFLUX_CENTRAL_REPO_URL`)
 
 **Files modified:**
-- `pipelines/<component-name>.yaml` — push pipeline definition
+- `pipelineruns/<repo-name>/.tekton/<component-name>-<version>-push.yaml` — push PipelineRun definition
 
 **Branch:** Creates a new feature branch from the version-specific branch (e.g., `rhoai-3.5`), **NOT** `main`.
 
@@ -75,17 +75,21 @@ Replace `rhoai-3.5` with the appropriate version branch.
 
 ### 4. Add PipelineRun YAML
 
-Generate or copy the push pipeline YAML to `pipelines/<component-name>.yaml`. The YAML should define a Tekton PipelineRun for push events, referencing the component's source repository, build context, and Dockerfile path.
+Generate or copy the push PipelineRun YAML to `pipelineruns/<repo-name>/.tekton/<component-name>-<version>-push.yaml`. The YAML should define a Tekton PipelineRun for push events, referencing the component's source repository, build context, and Dockerfile path.
+
+Create the directory structure if needed:
+
+    mkdir -p pipelineruns/<repo-name>/.tekton
 
 Validate the YAML file.
 
-    yamllint pipelines/<component-name>.yaml
+    yamllint pipelineruns/<repo-name>/.tekton/<component-name>-<version>-push.yaml
 
 ### 5. Commit and push changes
 
 Stage the modified file.
 
-    git add pipelines/<component-name>.yaml
+    git add pipelineruns/<repo-name>/.tekton/<component-name>-<version>-push.yaml
 
 Commit the changes.
 

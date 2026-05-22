@@ -1,6 +1,6 @@
 # Create Pull Pipelines in RHOAI-Konflux-Central
 
-Creates Tekton pull-request PipelineRun YAMLs for a new RHOAI component in the rhoai-konflux-central GitHub repository and raises a pull request targeting the version-specific branch.
+Creates Tekton pull-request PipelineRun YAMLs for a new RHOAI component in the rhoai-konflux-central GitHub repository and raises a pull request targeting the `main` branch.
 
 **Applies to:** RHOAI
 **Pipeline step:** 6
@@ -30,9 +30,9 @@ After the main push pipeline has been added to rhoai-konflux-central (Step 5). T
 **Repository:** `red-hat-data-services/konflux-central` (or override via `RHOAI_KONFLUX_CENTRAL_REPO_URL`)
 
 **Files modified:**
-- `pull-pipelines/<component-name>.yaml` — pull request pipeline definition
+- `pipelineruns/<repo-name>/.tekton/<component-name>-pull-request.yaml` — pull request PipelineRun definition
 
-**Branch:** Creates a new feature branch from the version-specific branch (e.g., `rhoai-3.5`), **NOT** `main`.
+**Branch:** Creates a new feature branch from `main`.
 
 ## Steps
 
@@ -54,30 +54,28 @@ For version `3.5-ea-1`, the branch is `rhoai-3.5-ea.1`.
 
 ### 3. Create a feature branch
 
-Create a new branch from the version-specific branch.
+Create a new branch from `main`.
 
     git fetch upstream
-    git checkout -b add-<component-name>-pull-pipeline upstream/rhoai-3.5
+    git checkout -b add-<component-name>-pull-pipeline upstream/main
 
-Replace `rhoai-3.5` with the appropriate version branch.
+### 4. Add pull-request PipelineRun YAML
 
-### 4. Add pull pipeline YAML
+Create the directory structure if it doesn't exist.
 
-Create the pull-pipelines directory if it doesn't exist.
+    mkdir -p pipelineruns/<repo-name>/.tekton
 
-    mkdir -p pull-pipelines
-
-Generate or copy the pull request pipeline YAML to `pull-pipelines/<component-name>.yaml`. The YAML should define a Tekton PipelineRun for pull request events, referencing the component's source repository, build context, and Dockerfile path.
+Generate or copy the pull request PipelineRun YAML to `pipelineruns/<repo-name>/.tekton/<component-name>-pull-request.yaml`. The YAML should define a Tekton PipelineRun for pull request events, referencing the component's source repository, build context, and Dockerfile path.
 
 Validate the YAML file.
 
-    yamllint pull-pipelines/<component-name>.yaml
+    yamllint pipelineruns/<repo-name>/.tekton/<component-name>-pull-request.yaml
 
 ### 5. Commit and push changes
 
 Stage the modified file.
 
-    git add pull-pipelines/<component-name>.yaml
+    git add pipelineruns/<repo-name>/.tekton/<component-name>-pull-request.yaml
 
 Commit the changes.
 
@@ -89,14 +87,14 @@ Push the branch to your fork.
 
 ### 6. Raise a GitHub PR
 
-Create a pull request targeting the upstream version-specific branch (e.g., `rhoai-3.5`).
+Create a pull request targeting the upstream `main` branch.
 
     gh pr create \
       --repo red-hat-data-services/konflux-central \
-      --base rhoai-3.5 \
+      --base main \
       --head $GITHUB_USER:add-<component-name>-pull-pipeline \
       --title "Add pull request pipeline for <component-name>" \
-      --body "Adds Tekton pull request PipelineRun configuration for <component-name> targeting RHOAI 3.5.
+      --body "Adds Tekton pull request PipelineRun configuration for <component-name>.
 
 Related Jira: <jira-url>"
 
@@ -130,7 +128,7 @@ Use the Jira web UI or API:
 | Target branch not found | Verify the branch name matches the RHOAI version. Contact maintainers if the branch doesn't exist. |
 | PR targets wrong branch | Recreate the PR with the correct `--base` argument. Delete the incorrect PR first. |
 | YAML validation fails | Check for syntax errors, indentation issues, or schema violations. Use `yamllint` to identify problems. |
-| Directory pull-pipelines not found | Create it with `mkdir -p pull-pipelines`. |
+| `.tekton` directory not found | Create it with `mkdir -p pipelineruns/<repo-name>/.tekton`. |
 | GITHUB_TOKEN lacks permissions | Ensure the token has `repo` scope. Regenerate the token at https://github.com/settings/tokens. |
 
 ## Automation
