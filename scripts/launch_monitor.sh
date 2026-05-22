@@ -3,7 +3,7 @@
 # writes a PID file, and returns immediately.
 #
 # Usage:
-#   bash "$COMMON_SCRIPTS_DIR/launch_monitor.sh" \
+#   bash "$SCRIPTS_DIR/launch_monitor.sh" \
 #     --step         NAME          \   # e.g. quay, krd, okc, operator
 #     --url          URL           \   # full MR or PR URL
 #     --type         github|gitlab \

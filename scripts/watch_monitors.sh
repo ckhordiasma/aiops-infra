@@ -6,7 +6,7 @@
 # Quiet per-minute polling stays in the individual monitor_<step>.log files.
 #
 # Usage:
-#   bash "$COMMON_SCRIPTS_DIR/watch_monitors.sh" --workdir <WORKDIR>
+#   bash "$SCRIPTS_DIR/watch_monitors.sh" --workdir <WORKDIR>
 #
 # Press Ctrl-C to stop watching.
 set -euo pipefail
