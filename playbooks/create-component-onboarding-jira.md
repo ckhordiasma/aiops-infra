@@ -98,7 +98,7 @@ Clone the appropriate template in Jira:
 - ODH: clone `RHOAIENG-35683`
 - RHOAI: clone `RHOAIENG-17225`
 
-Then attach the YAML, add labels, link to the parent feature, and post the summary comment.
+Then attach the YAML, add the `yaml-attached` label, remove the `template` label (inherited from the template), link to the parent feature, and post the summary comment.
 
 ### 7. Update Jira metadata
 

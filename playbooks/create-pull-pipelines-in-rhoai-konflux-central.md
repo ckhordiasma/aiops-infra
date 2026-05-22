@@ -3,7 +3,7 @@
 Creates a Tekton PipelineRun resource for pull-request builds of a new RHOAI component, generating a pull-request PipelineRun YAML under `pipelineruns/<repo_name>/.tekton/` and raising a PR to the `main` branch of `rhoai-konflux-central`.
 
 **Applies to:** RHOAI
-**Pipeline step:** 4c
+**Pipeline step:** 4 (RHOAI)
 
 ## When to use
 

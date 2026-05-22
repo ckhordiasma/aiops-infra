@@ -3,7 +3,7 @@
 Adds a new operator component to the operator repository by updating `build/manifests-config.yaml` and raising a GitHub PR. The target repo depends on the product context: `opendatahub-io/opendatahub-operator` for ODH, `red-hat-data-services/rhods-operator` for RHOAI.
 
 **Applies to:** Both (ODH and RHOAI)
-**Pipeline step:** 9
+**Pipeline step:** 5
 
 ## When to use
 

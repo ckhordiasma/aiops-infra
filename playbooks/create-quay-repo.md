@@ -3,7 +3,7 @@
 Creates a new Quay repository for an ODH component by raising a merge request to the `app-interface` GitLab repository (GitOps-driven). The Quay repo is automatically provisioned when the MR is merged.
 
 **Applies to:** Both (ODH and RHOAI)
-**Pipeline step:** 2
+**Pipeline step:** 1
 
 ## When to use
 

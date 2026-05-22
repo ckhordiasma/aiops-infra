@@ -3,7 +3,7 @@
 Configures auto-merge for a new component repository by updating four files in the `rhods-devops-infra` repo and raising a GitHub PR targeting `main`.
 
 **Applies to:** RHOAI
-**Pipeline step:** 10
+**Pipeline step:** 8 (RHOAI)
 
 ## When to use
 

@@ -3,7 +3,7 @@
 Triggers the `sync-renovate-configs.yml` GitHub Actions workflow in `rhoai-konflux-central` to propagate the central Renovate configuration to all registered component repositories.
 
 **Applies to:** RHOAI
-**Pipeline step:** 6c (post-merge)
+**Pipeline step:** 9 (RHOAI)
 
 ## When to use
 
@@ -47,15 +47,15 @@ The workflow typically completes within a few minutes. If it fails, check the lo
 
 ### 3. Handle outcomes
 
-**Success:** Add the label `renovate-sync-done` to Jira and comment with the run URL.
+**Success:** Remove the `renovate-sync-triggered` label, add `renovate-sync-done`, and comment with the run URL.
 
-**Failure:** Check the workflow logs for errors. Common issues include permission problems pushing to component repos. You can retry by triggering the workflow again.
+**Failure:** Remove the `renovate-sync-triggered` label, add `renovate-sync-failed`, and comment with the run URL. Check the workflow logs for errors. Common issues include permission problems pushing to component repos. You can retry by triggering the workflow again.
 
 **Timeout:** If the run takes more than 30 minutes, it may still be completing. Check the GitHub Actions UI.
 
 ### 4. Update Jira
 
-Add the label `renovate-sync-done` to the Jira ticket and comment confirming that the Renovate config has been synced to all registered repos.
+If not already done in Step 3, add the label `renovate-sync-done` to the Jira ticket and comment confirming that the Renovate config has been synced to all registered repos. At the start of the workflow (Step 2), add the `renovate-sync-triggered` label to track that a sync is in progress.
 
 ## Troubleshooting
 

@@ -3,7 +3,7 @@
 Ensures a component Dockerfile contains all seven mandatory RHOAI OCI labels. If any labels are missing or incorrect, clones the component repo, adds the labels, and raises a GitHub PR.
 
 **Applies to:** RHOAI
-**Pipeline step:** 7
+**Pipeline step:** Supplementary (RHOAI)
 
 ## When to use
 

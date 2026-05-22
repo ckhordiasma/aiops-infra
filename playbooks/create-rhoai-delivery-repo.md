@@ -3,7 +3,7 @@
 Creates a new RHOAI delivery repository in the Red Hat container registry by raising a merge request to the `pyxis-repo-configs` GitLab repository. The repository is provisioned automatically when the MR is merged by Release Engineering's GitOps pipeline.
 
 **Applies to:** RHOAI
-**Pipeline step:** 6
+**Pipeline step:** 2 (RHOAI)
 
 ## When to use
 

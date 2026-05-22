@@ -3,7 +3,7 @@
 Creates Konflux Component resources for a new ODH or RHOAI component by appending YAML documents to the appropriate tenant config file in the `konflux-release-data` GitLab repository and raising a merge request. When the MR is merged, a GitOps pipeline provisions the Component on the Konflux OpenShift cluster.
 
 **Applies to:** Both (ODH and RHOAI)
-**Pipeline step:** 3
+**Pipeline step:** 2 (ODH) / 3 (RHOAI)
 
 ## When to use
 

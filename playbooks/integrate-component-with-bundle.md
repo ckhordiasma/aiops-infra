@@ -3,7 +3,7 @@
 Updates the build-config repository with a new component's `relatedImages` entry in `bundle/bundle-patch.yaml` and, for RHOAI only, adds entries to `config/build-config.yaml` and `bundle/Dockerfile`. Raises a GitHub PR.
 
 **Applies to:** Both (ODH and RHOAI)
-**Pipeline step:** 8
+**Pipeline step:** 6
 
 ## When to use
 

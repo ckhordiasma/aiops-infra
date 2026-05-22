@@ -3,7 +3,7 @@
 Registers a new RHOAI component repository in the Renovate configuration maintained in `rhoai-konflux-central` (`config.yaml` on `main`) so that the Renovate bot keeps its dependencies up to date.
 
 **Applies to:** RHOAI
-**Pipeline step:** 6b (post-merge)
+**Pipeline step:** 9 (RHOAI)
 
 ## When to use
 

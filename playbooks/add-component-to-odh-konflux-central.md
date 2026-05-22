@@ -3,7 +3,7 @@
 Creates Tekton PipelineRun resources for a new ODH/RHOAI component by generating push and pull-request PipelineRun YAMLs from the OKC templates, adding the component to the onboarder workflow, and raising a pull request to `odh-konflux-central`.
 
 **Applies to:** Both (ODH and RHOAI)
-**Pipeline step:** 4
+**Pipeline step:** 3 (ODH)
 
 ## When to use
 
