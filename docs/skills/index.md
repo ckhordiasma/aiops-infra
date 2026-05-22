@@ -15,39 +15,39 @@ left off.
 
 | Step | Skill | Target |
 |------|-------|--------|
-| 0 | [create-component-onboarding-jira](create-component-onboarding-jira.md) | Jira (new ticket) |
-| — | [validate-component-onboarding-jira](validate-component-onboarding-jira.md) | Jira (pre-flight check) |
-| 1 | [create-quay-repo](create-quay-repo.md) | `app-interface` GitLab MR |
-| 2 | [onboard-component-to-konflux-release-data](onboard-component-to-konflux-release-data.md) | `konflux-release-data` GitLab MR |
-| 3 | [add-component-to-odh-konflux-central](add-component-to-odh-konflux-central.md) | `odh-konflux-central` GitHub PR |
-| 4 | [run-odh-konflux-onboarder-workflow](run-odh-konflux-onboarder-workflow.md) | GitHub Actions → Tekton PR |
-| 5 | [integrate-component-with-odh-operator](integrate-component-with-odh-operator.md) | `opendatahub-operator` GitHub PR *(operators only)* |
-| 6 | [integrate-component-with-bundle](integrate-component-with-bundle.md) | `ODH-Build-Config` GitHub PR |
+| 0 | [create-component-onboarding-jira](../../playbooks/create-component-onboarding-jira.md) | Jira (new ticket) |
+| — | [validate-component-onboarding-jira](../../playbooks/validate-component-onboarding-jira.md) | Jira (pre-flight check) |
+| 1 | [create-quay-repo](../../playbooks/create-quay-repo.md) | `app-interface` GitLab MR |
+| 2 | [onboard-component-to-konflux-release-data](../../playbooks/onboard-component-to-konflux-release-data.md) | `konflux-release-data` GitLab MR |
+| 3 | [add-component-to-odh-konflux-central](../../playbooks/add-component-to-odh-konflux-central.md) | `odh-konflux-central` GitHub PR |
+| 4 | [run-odh-konflux-onboarder-workflow](../../playbooks/run-odh-konflux-onboarder-workflow.md) | GitHub Actions → Tekton PR |
+| 5 | [integrate-component-with-odh-operator](../../playbooks/integrate-component-with-odh-operator.md) | `opendatahub-operator` GitHub PR *(operators only)* |
+| 6 | [integrate-component-with-bundle](../../playbooks/integrate-component-with-bundle.md) | `ODH-Build-Config` GitHub PR |
 
 ### RHOAI pipeline
 
 | Step | Skill | Target |
 |------|-------|--------|
-| 0 | [create-component-onboarding-jira](create-component-onboarding-jira.md) | Jira (new ticket) |
-| — | [validate-component-onboarding-jira](validate-component-onboarding-jira.md) | Jira (pre-flight check) |
-| 1 | [create-quay-repo](create-quay-repo.md) | `app-interface` GitLab MR |
-| 2 | [create-rhoai-delivery-repo](create-rhoai-delivery-repo.md) | `pyxis-repo-configs` GitLab MR |
-| 3 | [onboard-component-to-konflux-release-data](onboard-component-to-konflux-release-data.md) | `konflux-release-data` GitLab MR |
-| 4 | [add-component-to-rhoai-konflux-central](add-component-to-rhoai-konflux-central.md) | `konflux-central` GitHub PR (push pipeline) |
-| 4 | [create-pull-pipelines-in-rhoai-konflux-central](create-pull-pipelines-in-rhoai-konflux-central.md) | `konflux-central` GitHub PR (pull-request pipeline) |
-| 5 | [integrate-component-with-odh-operator](integrate-component-with-odh-operator.md) | `rhods-operator` GitHub PR *(operators only)* |
-| 6 | [integrate-component-with-bundle](integrate-component-with-bundle.md) | `RHOAI-Build-Config` GitHub PR |
-| 7 | [update-rhoai-product-listing](update-rhoai-product-listing.md) | `pyxis-repo-configs` GitLab MR |
-| 8 | [setup-auto-merge](setup-auto-merge.md) | `rhods-devops-infra` GitHub PR |
-| 9 | [enable-renovate-on-rhoai-component-repo](enable-renovate-on-rhoai-component-repo.md) | `konflux-central` GitHub PR |
-| 9 | [sync-rhoai-renovate-configs](sync-rhoai-renovate-configs.md) | GitHub Actions workflow |
+| 0 | [create-component-onboarding-jira](../../playbooks/create-component-onboarding-jira.md) | Jira (new ticket) |
+| — | [validate-component-onboarding-jira](../../playbooks/validate-component-onboarding-jira.md) | Jira (pre-flight check) |
+| 1 | [create-quay-repo](../../playbooks/create-quay-repo.md) | `app-interface` GitLab MR |
+| 2 | [create-rhoai-delivery-repo](../../playbooks/create-rhoai-delivery-repo.md) | `pyxis-repo-configs` GitLab MR |
+| 3 | [onboard-component-to-konflux-release-data](../../playbooks/onboard-component-to-konflux-release-data.md) | `konflux-release-data` GitLab MR |
+| 4 | [add-component-to-rhoai-konflux-central](../../playbooks/add-component-to-rhoai-konflux-central.md) | `konflux-central` GitHub PR (push pipeline) |
+| 4 | [create-pull-pipelines-in-rhoai-konflux-central](../../playbooks/create-pull-pipelines-in-rhoai-konflux-central.md) | `konflux-central` GitHub PR (pull-request pipeline) |
+| 5 | [integrate-component-with-odh-operator](../../playbooks/integrate-component-with-odh-operator.md) | `rhods-operator` GitHub PR *(operators only)* |
+| 6 | [integrate-component-with-bundle](../../playbooks/integrate-component-with-bundle.md) | `RHOAI-Build-Config` GitHub PR |
+| 7 | [update-rhoai-product-listing](../../playbooks/update-rhoai-product-listing.md) | `pyxis-repo-configs` GitLab MR |
+| 8 | [setup-auto-merge](../../playbooks/setup-auto-merge.md) | `rhods-devops-infra` GitHub PR |
+| 9 | [enable-renovate-on-rhoai-component-repo](../../playbooks/enable-renovate-on-rhoai-component-repo.md) | `konflux-central` GitHub PR |
+| 9 | [sync-rhoai-renovate-configs](../../playbooks/sync-rhoai-renovate-configs.md) | GitHub Actions workflow |
 
 ### Supplementary skills
 
 | Skill | Purpose |
 |-------|---------|
-| [add-rhoai-dockerfile-labels](add-rhoai-dockerfile-labels.md) | Ensure mandatory OCI labels are present in the component Dockerfile |
-| [onboard-konflux-components-for-odh-and-rhoai](onboard-konflux-components-for-odh-and-rhoai.md) | Master orchestrator — runs all pipeline steps above |
+| [add-rhoai-dockerfile-labels](../../playbooks/add-rhoai-dockerfile-labels.md) | Ensure mandatory OCI labels are present in the component Dockerfile |
+| [onboard-konflux-components-for-odh-and-rhoai](../../playbooks/onboard-konflux-components-for-odh-and-rhoai.md) | Master orchestrator — runs all pipeline steps above |
 
 ## Key repositories
 
