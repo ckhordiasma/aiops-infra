@@ -3,7 +3,7 @@
 Adds the component's registry path to the RHOAI product listing in pyxis-repo-configs.
 
 **Applies to:** RHOAI
-**Pipeline step:** 5 (final)
+**Pipeline step:** 7 (RHOAI)
 
 ## When to use
 

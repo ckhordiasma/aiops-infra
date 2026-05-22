@@ -28,6 +28,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --jira-url)        JIRA_URL="$2"; shift 2 ;;
     --existing-mr-url) EXISTING_MR_URL="$2"; shift 2 ;;
+    --workdir)       WORKDIR="$2"; shift 2 ;;
     -*)                echo "ERROR: Unknown flag: $1" >&2; exit 1 ;;
     *)
       # First positional arg treated as jira-url for backward compat

@@ -3,7 +3,7 @@
 Checks a component Dockerfile for mandatory RHOAI labels, and if any are missing or incorrect, clones the component repo, adds the labels, and raises a GitHub PR.
 
 **Applies to:** RHOAI
-**Pipeline step:** 11
+**Pipeline step:** Supplementary (RHOAI)
 
 ## When to use
 

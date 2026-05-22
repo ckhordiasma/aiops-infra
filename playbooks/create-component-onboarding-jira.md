@@ -3,7 +3,7 @@
 Interactively collects ODH/RHOAI component onboarding parameters, generates a validated component_onboarding_details.yaml, and creates or updates a Jira ticket with the YAML attached.
 
 **Applies to:** ODH / RHOAI / Both
-**Pipeline step:** Pre-requisite (Step 0)
+**Pipeline step:** 0 (prerequisite for all other onboarding steps)
 
 ## When to use
 
@@ -140,7 +140,17 @@ If the file already exists as an attachment, delete the old version first:
       -X DELETE \
       "https://redhat.atlassian.net/rest/api/2/attachment/<ATTACHMENT-ID>"
 
-### 6. Post a comment to the Jira ticket
+### 6. Remove inherited template label
+
+If the ticket was created by cloning a template (Option A), remove the inherited `template` label:
+
+    curl -u "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" \
+      -X PUT \
+      -H "Content-Type: application/json" \
+      -d '{"update":{"labels":[{"remove":"template"}]}}' \
+      "https://redhat.atlassian.net/rest/api/2/issue/$JIRA_ID"
+
+### 7. Post a comment to the Jira ticket
 
 Add a comment indicating the ticket is ready for automation:
 
@@ -150,7 +160,7 @@ Add a comment indicating the ticket is ready for automation:
       -d '{"body":"Component onboarding YAML has been attached. Ready for automation."}' \
       "https://redhat.atlassian.net/rest/api/2/issue/$JIRA_ID/comment"
 
-### 7. Display the Jira URL
+### 8. Display the Jira URL
 
 Output the final Jira URL for the user:
 

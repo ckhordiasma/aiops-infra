@@ -32,6 +32,7 @@ while [[ $# -gt 0 ]]; do
     --jira-url)      JIRA_URL="$2"; shift 2 ;;
     --visibility)    VISIBILITY="$2"; shift 2 ;;
     --existing-mr-url) EXISTING_MR_URL="$2"; shift 2 ;;
+    --workdir)       WORKDIR="$2"; shift 2 ;;
     -*)              echo "ERROR: Unknown flag: $1" >&2; exit 1 ;;
     *)
       if [[ -z "$QUAY_REPO" ]]; then

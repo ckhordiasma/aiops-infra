@@ -3,7 +3,7 @@
 Registers a new RHOAI component repository in the Renovate configuration to enable automatic dependency updates.
 
 **Applies to:** RHOAI  
-**Pipeline step:** 3
+**Pipeline step:** 9 (RHOAI)
 
 ## When to use
 

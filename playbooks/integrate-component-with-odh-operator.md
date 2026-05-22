@@ -3,7 +3,7 @@
 Adds operator component entries to the ODH or RHOAI operator repository by updating `build/manifests-config.yaml`.
 
 **Applies to:** ODH / RHOAI / Both
-**Pipeline step:** 3 (for operator components only)
+**Pipeline step:** 5
 
 ## When to use
 

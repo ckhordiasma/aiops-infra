@@ -3,7 +3,7 @@
 Onboards a new ODH/RHOAI component onto the Konflux CI platform by adding Component resources to konflux-release-data.
 
 **Applies to:** Both (ODH and RHOAI)
-**Pipeline step:** 3
+**Pipeline step:** 2 (ODH) / 3 (RHOAI)
 
 ## When to use
 

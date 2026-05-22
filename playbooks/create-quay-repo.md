@@ -3,7 +3,7 @@
 Creates a new Quay repository for an ODH/RHOAI component via GitOps merge request to app-interface.
 
 **Applies to:** Both (ODH and RHOAI)
-**Pipeline step:** 2
+**Pipeline step:** 1
 
 ## When to use
 

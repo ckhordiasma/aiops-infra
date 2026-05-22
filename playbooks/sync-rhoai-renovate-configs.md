@@ -3,7 +3,7 @@
 Triggers the `sync-renovate-configs` GitHub Actions workflow in `konflux-central` to push the central Renovate configuration to all registered component repositories.
 
 **Applies to:** RHOAI
-**Pipeline step:** 9
+**Pipeline step:** 9 (RHOAI)
 
 ## When to use
 
@@ -59,6 +59,8 @@ Alternatively, check the status periodically:
 
 The workflow typically completes within a few minutes but can take up to 30 minutes for many repos.
 
+If tracking via Jira, add label `renovate-sync-triggered` when the run starts and post a comment with the run URL.
+
 ### 4. Verify success
 
 Check that the run completed successfully:
@@ -69,9 +71,11 @@ If the run failed, view the logs:
 
     gh run view <run-id> --repo red-hat-data-services/konflux-central --log-failed
 
+If tracking via Jira and the run failed, add label `renovate-sync-failed` (removing `renovate-sync-triggered`) and post a comment with the failure details and log URL.
+
 ### 5. Update Jira
 
-Add the label `renovate-sync-done` to the onboarding Jira ticket and comment noting the workflow run URL and that the Renovate config sync completed successfully.
+On success, remove label `renovate-sync-triggered` (if present), add label `renovate-sync-done`, and comment noting the workflow run URL and that the Renovate config sync completed successfully.
 
 ## Troubleshooting
 

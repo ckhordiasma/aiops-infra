@@ -3,7 +3,7 @@
 Adds a component's relatedImages entry to the build config bundle and (for RHOAI) updates the repo mappings and Dockerfile git labels.
 
 **Applies to:** ODH / RHOAI / Both
-**Pipeline step:** 4
+**Pipeline step:** 6
 
 ## When to use
 

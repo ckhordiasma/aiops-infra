@@ -3,7 +3,7 @@
 Pre-flight validation for ODH/RHOAI component onboarding tickets.
 
 **Applies to:** ODH / RHOAI / Both
-**Pipeline step:** Pre-requisite (Step 0)
+**Pipeline step:** Pre-flight (run before any onboarding automation)
 
 ## When to use
 

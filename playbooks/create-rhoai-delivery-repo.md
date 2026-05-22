@@ -3,7 +3,7 @@
 Creates an RHOAI delivery repository in the Red Hat container registry by adding an entry to pyxis-repo-configs.
 
 **Applies to:** RHOAI
-**Pipeline step:** 4
+**Pipeline step:** 2 (RHOAI)
 
 ## When to use
 

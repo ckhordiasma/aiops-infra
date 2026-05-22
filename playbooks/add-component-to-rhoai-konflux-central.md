@@ -3,7 +3,7 @@
 Adds a Tekton PipelineRun YAML to the rhoai-konflux-central GitHub repository for a new RHOAI component, then raises a GitHub PR targeting the version-specific branch.
 
 **Applies to:** RHOAI
-**Pipeline step:** 5
+**Pipeline step:** 4 (RHOAI)
 
 ## When to use
 

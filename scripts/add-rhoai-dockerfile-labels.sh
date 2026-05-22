@@ -20,6 +20,7 @@ JIRA_ID=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --jira-url) JIRA_URL="$2"; shift 2 ;;
+    --workdir)  WORKDIR="$2"; shift 2 ;;
     *)
       if [[ -z "$JIRA_URL" && "$1" == *"/browse/"* ]]; then
         JIRA_URL="$1"; shift

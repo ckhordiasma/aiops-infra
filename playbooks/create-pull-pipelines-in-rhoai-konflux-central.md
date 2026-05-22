@@ -3,7 +3,7 @@
 Creates Tekton pull-request PipelineRun YAMLs for a new RHOAI component in the rhoai-konflux-central GitHub repository and raises a pull request targeting the `main` branch.
 
 **Applies to:** RHOAI
-**Pipeline step:** 6
+**Pipeline step:** 4 (RHOAI)
 
 ## When to use
 

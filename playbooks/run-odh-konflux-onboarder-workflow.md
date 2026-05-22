@@ -3,7 +3,7 @@
 Trigger the odh-konflux-onboarder GitHub Actions workflow to generate Tekton configuration for a component.
 
 **Applies to:** ODH
-**Pipeline step:** 6
+**Pipeline step:** 4 (ODH)
 
 ## When to use
 

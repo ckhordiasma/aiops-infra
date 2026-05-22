@@ -170,7 +170,7 @@ if is_unblocked "quay"; then
   EXISTING_URL=$(jq -r '.steps.quay.mr_url // ""' "$PIPELINE_STATE")
   EXTRA_ARGS=""
   [[ -n "$EXISTING_URL" ]] && EXTRA_ARGS="--existing-mr-url $EXISTING_URL"
-  if MR_URL=$(bash "$SCRIPTS_DIR/create-quay-repo.sh" "$JIRA_URL" --workdir "$WORKDIR" $EXTRA_ARGS 2>&1 | tee /dev/stderr | grep -oE 'https://[^ ]+merge_requests/[0-9]+' | tail -1); then
+  if MR_URL=$(bash "$SCRIPTS_DIR/create-quay-repo.sh" "$QUAY_REPO_URI" --jira-url "$JIRA_URL" --workdir "$WORKDIR" $EXTRA_ARGS 2>&1 | tee /dev/stderr | grep -oE 'https://[^ ]+merge_requests/[0-9]+' | tail -1); then
     record_result "quay" "$MR_URL" "mr_url" "mr_raised"
   else
     # Check if repo already exists (exit 0 from child)

@@ -3,7 +3,7 @@
 Adds Tekton PipelineRun YAMLs and updates the onboarder workflow in the odh-konflux-central GitHub repository for a new ODH component, then raises a GitHub PR.
 
 **Applies to:** ODH
-**Pipeline step:** 5
+**Pipeline step:** 3 (ODH)
 
 ## When to use
 

@@ -3,7 +3,7 @@
 Configures auto-merge for a component's Konflux CI pull requests in the rhods-devops-infra repository.
 
 **Applies to:** RHOAI
-**Pipeline step:** 8
+**Pipeline step:** 8 (RHOAI)
 
 ## When to use
 
