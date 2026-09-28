@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
-from urllib.request import Request
+from urllib.request import HTTPRedirectHandler, Request
 
 import pytest
 
@@ -64,3 +64,30 @@ def test_fetch_does_not_send_token_to_other_hosts(monkeypatch: pytest.MonkeyPatc
     CHECKER.fetch("https://example.com/Dockerfile")
 
     assert requests[0].get_header("Authorization") is None
+
+
+def test_fetch_does_not_send_token_over_http(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "secret-token")
+    requests = _capture_request(monkeypatch)
+
+    CHECKER.fetch("http://raw.githubusercontent.com/example/repo/main/Dockerfile")
+
+    assert requests[0].get_header("Authorization") is None
+
+
+def test_fetch_does_not_forward_token_on_redirect(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "secret-token")
+    requests = _capture_request(monkeypatch)
+    CHECKER.fetch("https://raw.githubusercontent.com/example/repo/main/Dockerfile")
+
+    redirected = HTTPRedirectHandler().redirect_request(
+        requests[0],
+        None,
+        302,
+        "Found",
+        {},
+        "https://example.com/Dockerfile",
+    )
+
+    assert redirected is not None
+    assert redirected.get_header("Authorization") is None

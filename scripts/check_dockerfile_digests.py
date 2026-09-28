@@ -31,11 +31,11 @@ import urllib.request
 def fetch(source: str) -> str:
     try:
         if source.startswith("http://") or source.startswith("https://"):
-            headers = {}
+            request = urllib.request.Request(source)
             token = os.environ.get("GITHUB_TOKEN")
-            if token and urllib.parse.urlparse(source).hostname == "raw.githubusercontent.com":
-                headers["Authorization"] = f"Bearer {token}"
-            request = urllib.request.Request(source, headers=headers)
+            parsed = urllib.parse.urlparse(source)
+            if token and parsed.scheme == "https" and parsed.hostname == "raw.githubusercontent.com":
+                request.add_unredirected_header("Authorization", f"Bearer {token}")
             with urllib.request.urlopen(request) as resp:
                 return resp.read().decode()
         else:
